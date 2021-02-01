@@ -47,22 +47,22 @@ class MetaTrainer(object):
         # Load meta-train set
         self.trainset = Dataset('train', self.args)
         self.train_sampler = CategoriesSampler(self.trainset.label, self.args.num_batch, self.args.way, self.args.shot + self.args.train_query)
-        self.train_loader = DataLoader(dataset=self.trainset, batch_sampler=self.train_sampler, num_workers=8, pin_memory=True)
+        self.train_loader = DataLoader(dataset=self.trainset, batch_sampler=self.train_sampler, num_workers=args.num_workers, pin_memory=True)
 
         # Load meta-val set
         self.valset = Dataset('val', self.args)
         self.val_sampler = CategoriesSampler(self.valset.label, 600, self.args.way, self.args.shot + self.args.val_query)
-        self.val_loader = DataLoader(dataset=self.valset, batch_sampler=self.val_sampler, num_workers=8, pin_memory=True)
-        
+        self.val_loader = DataLoader(dataset=self.valset, batch_sampler=self.val_sampler, num_workers=args.num_workers, pin_memory=True)
+
         # Build meta-transfer learning model
         self.model = MtlLearner(self.args)
 
-        # Set optimizer 
+        # Set optimizer
         self.optimizer = torch.optim.Adam([{'params': filter(lambda p: p.requires_grad, self.model.encoder.parameters())}, \
             {'params': self.model.base_learner.parameters(), 'lr': self.args.meta_lr2}], lr=self.args.meta_lr1)
-        # Set learning rate scheduler 
-        self.lr_scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer, step_size=self.args.step_size, gamma=self.args.gamma)        
-        
+        # Set learning rate scheduler
+        self.lr_scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer, step_size=self.args.step_size, gamma=self.args.gamma)
+
         # load pretrained model without FC classifier
         self.model_dict = self.model.state_dict()
         if self.args.init_weights is not None:
@@ -78,19 +78,20 @@ class MetaTrainer(object):
         pretrained_dict = {k: v for k, v in pretrained_dict.items() if k in self.model_dict}
         print(pretrained_dict.keys())
         self.model_dict.update(pretrained_dict)
-        self.model.load_state_dict(self.model_dict)    
+        self.model.load_state_dict(self.model_dict)
 
         # Set model to GPU
         if torch.cuda.is_available():
             torch.backends.cudnn.benchmark = True
             self.model = self.model.cuda()
-        
+
     def save_model(self, name):
         """The function to save checkpoints.
         Args:
           name: the name for saved checkpoint
-        """  
-        torch.save(dict(params=self.model.state_dict()), osp.join(self.args.save_path, name + '.pth'))           
+        """
+        #torch.save(dict(params=self.model.encoder.state_dict()), osp.join(self.args.save_path, name + '.pth'))
+        torch.save(dict(params=self.model.encoder.state_dict()), "../models/{}/meta_{}_trial{}_{}.pth".format(self.args.exp_id,self.args.model_id,self.args.trial_number,name))
 
     def train(self):
         """The function for the meta-train phase."""
@@ -118,7 +119,7 @@ class MetaTrainer(object):
             label_shot = label_shot.type(torch.cuda.LongTensor)
         else:
             label_shot = label_shot.type(torch.LongTensor)
-        
+
         # Start meta-train
         for epoch in range(1, self.args.max_epoch + 1):
             # Update learning rate
@@ -139,7 +140,7 @@ class MetaTrainer(object):
             # Using tqdm to read samples from train loader
             tqdm_gen = tqdm.tqdm(self.train_loader)
             for i, batch in enumerate(tqdm_gen, 1):
-                # Update global count number 
+                # Update global count number
                 global_count = global_count + 1
                 if torch.cuda.is_available():
                     data, _ = [_.cuda() for _ in batch]
@@ -185,7 +186,7 @@ class MetaTrainer(object):
                 label = label.type(torch.cuda.LongTensor)
             else:
                 label = label.type(torch.LongTensor)
-                
+
             # Print previous information
             if epoch % 10 == 0:
                 print('Best Epoch {}, Best Val Acc={:.4f}'.format(trlog['max_acc_epoch'], trlog['max_acc']))
@@ -209,7 +210,7 @@ class MetaTrainer(object):
             val_acc_averager = val_acc_averager.item()
             # Write the tensorboardX records
             writer.add_scalar('data/val_loss', float(val_loss_averager), epoch)
-            writer.add_scalar('data/val_acc', float(val_acc_averager), epoch)       
+            writer.add_scalar('data/val_acc', float(val_acc_averager), epoch)
             # Print loss and accuracy for this epoch
             print('Epoch {}, Val, Loss={:.4f} Acc={:.4f}'.format(epoch, val_loss_averager, val_acc_averager))
 
@@ -271,7 +272,7 @@ class MetaTrainer(object):
             label_shot = label_shot.type(torch.cuda.LongTensor)
         else:
             label_shot = label_shot.type(torch.LongTensor)
-            
+
         # Start meta-test
         for i, batch in enumerate(loader, 1):
             if torch.cuda.is_available():
@@ -286,9 +287,10 @@ class MetaTrainer(object):
             test_acc_record[i-1] = acc
             if i % 100 == 0:
                 print('batch {}: {:.2f}({:.2f})'.format(i, ave_acc.item() * 100, acc * 100))
-            
+
         # Calculate the confidence interval, update the logs
         m, pm = compute_confidence_interval(test_acc_record)
         print('Val Best Epoch {}, Acc {:.4f}, Test Acc {:.4f}'.format(trlog['max_acc_epoch'], trlog['max_acc'], ave_acc.item()))
         print('Test Acc {:.4f} + {:.4f}'.format(m, pm))
-        
+
+        return m

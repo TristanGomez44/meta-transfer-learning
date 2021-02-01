@@ -46,13 +46,15 @@ class MtlLearner(nn.Module):
         self.update_lr = args.base_lr
         self.update_step = args.update_step
         z_dim = 640
-        self.base_learner = BaseLearner(args, z_dim)
+        self.nbVec = args.nb_parts
+
+        self.base_learner = BaseLearner(args, self.nbVec*z_dim)
 
         if self.mode == 'meta':
-            self.encoder = ResNetMtl()  
+            self.encoder = ResNetMtl(nbVec=self.nbVec)
         else:
-            self.encoder = ResNetMtl(mtl=False)  
-            self.pre_fc = nn.Sequential(nn.Linear(640, 1000), nn.ReLU(), nn.Linear(1000, num_cls))
+            self.encoder = ResNetMtl(mtl=False,nbVec=self.nbVec)
+            self.pre_fc = nn.Sequential(nn.Linear(self.nbVec*z_dim, 1000), nn.ReLU(), nn.Linear(1000, num_cls))
 
     def forward(self, inp):
         """The function to forward the model.
@@ -103,7 +105,7 @@ class MtlLearner(nn.Module):
             loss = F.cross_entropy(logits, label_shot)
             grad = torch.autograd.grad(loss, fast_weights)
             fast_weights = list(map(lambda p: p[1] - self.update_lr * p[0], zip(grad, fast_weights)))
-            logits_q = self.base_learner(embedding_query, fast_weights)        
+            logits_q = self.base_learner(embedding_query, fast_weights)
         return logits_q
 
     def preval_forward(self, data_shot, label_shot, data_query):
@@ -128,6 +130,5 @@ class MtlLearner(nn.Module):
             loss = F.cross_entropy(logits, label_shot)
             grad = torch.autograd.grad(loss, fast_weights)
             fast_weights = list(map(lambda p: p[1] - 0.01 * p[0], zip(grad, fast_weights)))
-            logits_q = self.base_learner(embedding_query, fast_weights)         
+            logits_q = self.base_learner(embedding_query, fast_weights)
         return logits_q
-        

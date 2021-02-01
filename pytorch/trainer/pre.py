@@ -41,39 +41,40 @@ class PreTrainer(object):
 
         # Load pretrain set
         self.trainset = Dataset('train', self.args, train_aug=True)
-        self.train_loader = DataLoader(dataset=self.trainset, batch_size=args.pre_batch_size, shuffle=True, num_workers=8, pin_memory=True)
+        self.train_loader = DataLoader(dataset=self.trainset, batch_size=args.pre_batch_size, shuffle=True, num_workers=args.num_workers, pin_memory=True)
 
         # Load meta-val set
         self.valset = Dataset('val', self.args)
         self.val_sampler = CategoriesSampler(self.valset.label, 600, self.args.way, self.args.shot + self.args.val_query)
-        self.val_loader = DataLoader(dataset=self.valset, batch_sampler=self.val_sampler, num_workers=8, pin_memory=True)
+        self.val_loader = DataLoader(dataset=self.valset, batch_sampler=self.val_sampler, num_workers=args.num_workers, pin_memory=True)
 
-        # Set pretrain class number 
+        # Set pretrain class number
         num_class_pretrain = self.trainset.num_class
-        
+
         # Build pretrain model
         self.model = MtlLearner(self.args, mode='pre', num_cls=num_class_pretrain)
 
-        # Set optimizer 
+        # Set optimizer
         self.optimizer = torch.optim.SGD([{'params': self.model.encoder.parameters(), 'lr': self.args.pre_lr}, \
             {'params': self.model.pre_fc.parameters(), 'lr': self.args.pre_lr}], \
                 momentum=self.args.pre_custom_momentum, nesterov=True, weight_decay=self.args.pre_custom_weight_decay)
-        # Set learning rate scheduler 
+        # Set learning rate scheduler
         self.lr_scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer, step_size=self.args.pre_step_size, \
-            gamma=self.args.pre_gamma)        
-        
+            gamma=self.args.pre_gamma)
+
         # Set model to GPU
         if torch.cuda.is_available():
             torch.backends.cudnn.benchmark = True
             self.model = self.model.cuda()
-        
+
     def save_model(self, name):
         """The function to save checkpoints.
         Args:
           name: the name for saved checkpoint
-        """  
-        torch.save(dict(params=self.model.encoder.state_dict()), osp.join(self.args.save_path, name + '.pth'))
-        
+        """
+        #torch.save(dict(params=self.model.encoder.state_dict()), osp.join(self.args.save_path, name + '.pth'))
+        torch.save(dict(params=self.model.encoder.state_dict()), "../models/{}/pre_{}_trial{}_{}.pth".format(self.args.exp_id,self.args.model_id,self.args.trial_number,name))
+
     def train(self):
         """The function for the pre-train phase."""
 
@@ -93,7 +94,7 @@ class PreTrainer(object):
         global_count = 0
         # Set tensorboardX
         writer = SummaryWriter(comment=self.args.save_path)
-        
+
         # Start pretrain
         for epoch in range(1, self.args.pre_max_epoch + 1):
             # Update learning rate
@@ -104,11 +105,11 @@ class PreTrainer(object):
             # Set averager classes to record training losses and accuracies
             train_loss_averager = Averager()
             train_acc_averager = Averager()
-                
+
             # Using tqdm to read samples from train loader
             tqdm_gen = tqdm.tqdm(self.train_loader)
             for i, batch in enumerate(tqdm_gen, 1):
-                # Update global count number 
+                # Update global count number
                 global_count = global_count + 1
                 if torch.cuda.is_available():
                     data, _ = [_.cuda() for _ in batch]
@@ -152,7 +153,7 @@ class PreTrainer(object):
             val_loss_averager = Averager()
             val_acc_averager = Averager()
 
-            # Generate the labels for test 
+            # Generate the labels for test
             label = torch.arange(self.args.way).repeat(self.args.val_query)
             if torch.cuda.is_available():
                 label = label.type(torch.cuda.LongTensor)
@@ -163,8 +164,8 @@ class PreTrainer(object):
                 label_shot = label_shot.type(torch.cuda.LongTensor)
             else:
                 label_shot = label_shot.type(torch.LongTensor)
-              
-            # Print previous information  
+
+            # Print previous information
             if epoch % 10 == 0:
                 print('Best Epoch {}, Best Val acc={:.4f}'.format(trlog['max_acc_epoch'], trlog['max_acc']))
             # Run meta-validation
@@ -186,7 +187,7 @@ class PreTrainer(object):
             val_acc_averager = val_acc_averager.item()
             # Write the tensorboardX records
             writer.add_scalar('data/val_loss', float(val_loss_averager), epoch)
-            writer.add_scalar('data/val_acc', float(val_acc_averager), epoch)       
+            writer.add_scalar('data/val_acc', float(val_acc_averager), epoch)
             # Print loss and accuracy for this epoch
             print('Epoch {}, Val, Loss={:.4f} Acc={:.4f}'.format(epoch, val_loss_averager, val_acc_averager))
 
@@ -211,4 +212,5 @@ class PreTrainer(object):
             if epoch % 10 == 0:
                 print('Running Time: {}, Estimated Time: {}'.format(timer.measure(), timer.measure(epoch / self.args.max_epoch)))
         writer.close()
-        
+
+        return trlog['max_acc']

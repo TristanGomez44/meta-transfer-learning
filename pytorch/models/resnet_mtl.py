@@ -10,6 +10,7 @@
 ##+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 """ ResNet with MTL. """
 import torch.nn as nn
+import torch
 from models.conv2d_mtl import Conv2dMtl
 
 def conv3x3(in_planes, out_planes, stride=1):
@@ -162,7 +163,7 @@ class BottleneckMtl(nn.Module):
 
 class ResNetMtl(nn.Module):
 
-    def __init__(self, layers=[4, 4, 4], mtl=True):
+    def __init__(self, layers=[4, 4, 4], mtl=True,nbVec=3):
         super(ResNetMtl, self).__init__()
         if mtl:
             self.Conv2d = Conv2dMtl
@@ -178,7 +179,8 @@ class ResNetMtl(nn.Module):
         self.layer1 = self._make_layer(block, cfg[0], layers[0], stride=2)
         self.layer2 = self._make_layer(block, cfg[1], layers[1], stride=2)
         self.layer3 = self._make_layer(block, cfg[2], layers[2], stride=2)
-        self.avgpool = nn.AvgPool2d(10, stride=1)
+        #self.avgpool = nn.AvgPool2d(10, stride=1)
+        self.nbVec = nbVec
 
         for m in self.modules():
             if isinstance(m, self.Conv2d):
@@ -211,8 +213,37 @@ class ResNetMtl(nn.Module):
         x = self.layer2(x)
         x = self.layer3(x)
 
-        x = self.avgpool(x)
-        x = x.view(x.size(0), -1)
+        #x = self.avgpool(x)
+
+        x,_ = representativeVectors(x,self.nbVec)
+        x = torch.cat(x,dim=-1)
+
+        #x = x.view(x.size(0), -1)
 
         return x
-        
+
+
+def representativeVectors(x,nbVec):
+
+    xOrigShape = x.size()
+
+    x = x.permute(0,2,3,1).reshape(x.size(0),x.size(2)*x.size(3),x.size(1))
+    norm = torch.sqrt(torch.pow(x,2).sum(dim=-1)) + 0.00001
+
+    raw_reprVec_score = norm.clone()
+
+    repreVecList = []
+    simList = []
+    for _ in range(nbVec):
+        _,ind = raw_reprVec_score.max(dim=1,keepdim=True)
+        raw_reprVec_norm = norm[torch.arange(x.size(0)).unsqueeze(1),ind]
+        raw_reprVec = x[torch.arange(x.size(0)).unsqueeze(1),ind]
+        sim = (x*raw_reprVec).sum(dim=-1)/(norm*raw_reprVec_norm)
+        simNorm = sim/sim.sum(dim=1,keepdim=True)
+        reprVec = (x*simNorm.unsqueeze(-1)).sum(dim=1)
+        repreVecList.append(reprVec)
+        raw_reprVec_score = (1-sim)*raw_reprVec_score
+        simReshaped = simNorm.reshape(sim.size(0),1,xOrigShape[2],xOrigShape[3])
+        simList.append(simReshaped)
+
+    return repreVecList,simList

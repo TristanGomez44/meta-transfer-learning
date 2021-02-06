@@ -93,7 +93,7 @@ class MetaTrainer(object):
         #torch.save(dict(params=self.model.encoder.state_dict()), osp.join(self.args.save_path, name + '.pth'))
         torch.save(dict(params=self.model.encoder.state_dict()), "../models/{}/meta_{}_trial{}_{}.pth".format(self.args.exp_id,self.args.model_id,self.args.trial_number,name))
 
-    def train(self):
+    def train(self,trial):
         """The function for the meta-train phase."""
 
         # Set the meta-train log
@@ -235,6 +235,8 @@ class MetaTrainer(object):
             if epoch % 10 == 0:
                 print('Running Time: {}, Estimated Time: {}'.format(timer.measure(), timer.measure(epoch / self.args.max_epoch)))
 
+            trial.report(trlog['val_acc'])
+            
         writer.close()
 
     def eval(self):

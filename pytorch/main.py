@@ -68,9 +68,10 @@ def run(args,trial):
     if args.phase == "meta_train":
         bestPreTrialNb,args.nb_parts = findBestTrial(args)
         args.init_weights = "../models/{}/pre_{}_trial{}_max_acc.pth".format(args.exp_id,args.pre_model_id,bestPreTrialNb)
+        print("args.init_weights",args.init_weights)
 
         trainer = MetaTrainer(args)
-        trainer.train()
+        trainer.train(trial)
 
         args.eval_weights = "../models/{}/meta_{}_trial{}_max_acc.pth".format(args.exp_id,args.model_id,trial.number)
         val = trainer.eval()

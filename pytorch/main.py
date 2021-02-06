@@ -66,7 +66,7 @@ def run(args,trial):
     args.trial_number = trial.number
 
     if args.phase == "meta_train":
-        bestPreTrialNb,args.nb_parts = findBestTrial(args)
+        bestPreTrialNb,args.nb_parts = findBestTrial(args,pre=True)
         args.init_weights = "../models/{}/pre_{}_trial{}_max_acc.pth".format(args.exp_id,args.pre_model_id,bestPreTrialNb)
         print("args.init_weights",args.init_weights)
 
@@ -85,8 +85,11 @@ def run(args,trial):
 
     return val
 
-def findBestTrial(args):
-    con = sqlite3.connect("../results/{}/{}_hypSearch.db".format(args.exp_id,args.pre_model_id))
+def findBestTrial(args,pre):
+
+    id = args.pre_model_id if pre else args.model_id
+
+    con = sqlite3.connect("../results/{}/{}_hypSearch.db".format(args.exp_id,id))
     curr = con.cursor()
 
     curr.execute('SELECT trial_id,value FROM trials WHERE study_id == 1')
@@ -225,10 +228,11 @@ if __name__ == '__main__':
                 else:
                     raise RuntimeError(e)
 
-    bestTrialId,args.nb_parts = findBestTrial(args)
-    args.eval_weights = "../models/{}/meta_{}_trial{}_max_acc.pth".format(args.exp_id,args.model_id,bestTrialId-1)
+    if args.phase == "meta_train":
+        bestTrialId,args.nb_parts = findBestTrial(args,pre=False)
+        args.eval_weights = "../models/{}/meta_{}_trial{}_max_acc.pth".format(args.exp_id,args.model_id,bestTrialId-1)
 
-    copyfile(args.eval_weights, args.eval_weights.replace("_trial{}".format(bestTrialId-1),""))
+        copyfile(args.eval_weights, args.eval_weights.replace("_trial{}".format(bestTrialId-1),""))
 
-    trainer = MetaTrainer(args)
-    trainer.eval()
+        trainer = MetaTrainer(args)
+        trainer.eval()

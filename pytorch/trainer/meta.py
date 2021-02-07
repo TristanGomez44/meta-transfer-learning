@@ -235,8 +235,8 @@ class MetaTrainer(object):
             if epoch % 10 == 0:
                 print('Running Time: {}, Estimated Time: {}'.format(timer.measure(), timer.measure(epoch / self.args.max_epoch)))
 
-            trial.report(trlog['val_acc'])
-            
+            trial.report(val_acc_averager,epoch)
+
         writer.close()
 
     def eval(self):

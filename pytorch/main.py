@@ -135,7 +135,7 @@ if __name__ == '__main__':
     parser.add_argument('--dataset_dir', type=str, default='./data/mini/') # Dataset folder
 
     # Parameters for meta-train phase
-    parser.add_argument('--max_epoch', type=int, default=100) # Epoch number for meta-train phase
+    parser.add_argument('--max_epoch', type=int, default=50) # Epoch number for meta-train phase
     parser.add_argument('--num_batch', type=int, default=100) # The number for different tasks used for meta-train
     parser.add_argument('--shot', type=int, default=1) # Shot number, how many samples for one class in a task
     parser.add_argument('--way', type=int, default=5) # Way number, how many classes in a task

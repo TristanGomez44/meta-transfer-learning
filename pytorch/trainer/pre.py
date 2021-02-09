@@ -196,9 +196,6 @@ class PreTrainer(object):
                 trlog['max_acc'] = val_acc_averager
                 trlog['max_acc_epoch'] = epoch
                 self.save_model('max_acc')
-            # Save model every 10 epochs
-            if epoch % 10 == 0:
-                self.save_model('epoch'+str(epoch))
 
             # Update the logs
             trlog['train_loss'].append(train_loss_averager)

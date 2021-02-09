@@ -91,7 +91,7 @@ class MetaTrainer(object):
           name: the name for saved checkpoint
         """
         #torch.save(dict(params=self.model.encoder.state_dict()), osp.join(self.args.save_path, name + '.pth'))
-        torch.save(dict(params=self.model.encoder.state_dict()), "../models/{}/meta_{}_trial{}_{}.pth".format(self.args.exp_id,self.args.model_id,self.args.trial_number,name))
+        torch.save(dict(params=self.model.state_dict()), "../models/{}/meta_{}_trial{}_{}.pth".format(self.args.exp_id,self.args.model_id,self.args.trial_number,name))
 
     def train(self,trial):
         """The function for the meta-train phase."""
@@ -219,9 +219,6 @@ class MetaTrainer(object):
                 trlog['max_acc'] = val_acc_averager
                 trlog['max_acc_epoch'] = epoch
                 self.save_model('max_acc')
-            # Save model every 10 epochs
-            if epoch % 10 == 0:
-                self.save_model('epoch'+str(epoch))
 
             # Update the logs
             trlog['train_loss'].append(train_loss_averager)

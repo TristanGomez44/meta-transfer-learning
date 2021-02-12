@@ -205,7 +205,7 @@ class ResNetMtl(nn.Module):
             layers.append(block(self.inplanes, planes))
         return nn.Sequential(*layers)
 
-    def forward(self, x):
+    def forward(self, x,retSimMap=False):
         x = self.conv1(x)
         x = self.bn1(x)
         x = self.relu(x)
@@ -215,13 +215,15 @@ class ResNetMtl(nn.Module):
 
         #x = self.avgpool(x)
 
-        x,_ = representativeVectors(x,self.nbVec)
+        x,simMap = representativeVectors(x,self.nbVec)
         x = torch.cat(x,dim=-1)
 
         #x = x.view(x.size(0), -1)
-
-        return x
-
+        if retSimMap:
+            retDict = {"x":x,"simMap":simMap}
+            return retDict
+        else:
+            return x
 
 def representativeVectors(x,nbVec):
 

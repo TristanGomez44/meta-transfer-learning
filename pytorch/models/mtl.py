@@ -56,7 +56,7 @@ class MtlLearner(nn.Module):
             self.encoder = ResNetMtl(mtl=False,nbVec=self.nbVec)
             self.pre_fc = nn.Sequential(nn.Linear(self.nbVec*z_dim, 1000), nn.ReLU(), nn.Linear(1000, num_cls))
 
-    def forward(self, inp):
+    def forward(self, inp,retSimMap=False):
         """The function to forward the model.
         Args:
           inp: input images.
@@ -67,7 +67,7 @@ class MtlLearner(nn.Module):
             return self.pretrain_forward(inp)
         elif self.mode=='meta':
             data_shot, label_shot, data_query = inp
-            return self.meta_forward(data_shot, label_shot, data_query)
+            return self.meta_forward(data_shot, label_shot, data_query,retSimMap)
         elif self.mode=='preval':
             data_shot, label_shot, data_query = inp
             return self.preval_forward(data_shot, label_shot, data_query)
@@ -83,7 +83,7 @@ class MtlLearner(nn.Module):
         """
         return self.pre_fc(self.encoder(inp))
 
-    def meta_forward(self, data_shot, label_shot, data_query):
+    def meta_forward(self, data_shot, label_shot, data_query,retSimMap=False):
         """The function to forward meta-train phase.
         Args:
           data_shot: train images for the task
@@ -92,8 +92,14 @@ class MtlLearner(nn.Module):
         Returns:
           logits_q: the predictions for the test samples.
         """
-        embedding_query = self.encoder(data_query)
-        embedding_shot = self.encoder(data_shot)
+        if retSimMap:
+            querDic = self.encoder(data_query,retSimMap)
+            shotDic = self.encoder(data_shot,retSimMap)
+            embedding_query = querDic["x"]
+            embedding_shot = shotDic["x"]
+        else:
+            embedding_query = self.encoder(data_query,retSimMap)
+            embedding_shot = self.encoder(data_shot,retSimMap)
         logits = self.base_learner(embedding_shot)
         loss = F.cross_entropy(logits, label_shot)
         grad = torch.autograd.grad(loss, self.base_learner.parameters())
@@ -106,7 +112,11 @@ class MtlLearner(nn.Module):
             grad = torch.autograd.grad(loss, fast_weights)
             fast_weights = list(map(lambda p: p[1] - self.update_lr * p[0], zip(grad, fast_weights)))
             logits_q = self.base_learner(embedding_query, fast_weights)
-        return logits_q
+
+        if retSimMap:
+            return logits_q,querDic["simMap"],shotDic["simMap"]
+        else:
+            return logits_q
 
     def preval_forward(self, data_shot, label_shot, data_query):
         """The function to forward meta-validation during pretrain phase.

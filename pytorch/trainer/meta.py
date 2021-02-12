@@ -280,12 +280,21 @@ class MetaTrainer(object):
                 data = batch[0]
             k = self.args.way * self.args.shot
             data_shot, data_query = data[:k], data[k:]
-            logits = self.model((data_shot, label_shot, data_query))
+
+            if i % 100 == 0:
+                print('batch {}: {:.2f}({:.2f})'.format(i, ave_acc.item() * 100, acc * 100))
+                logits,simMapQuer,simMapShot = self.model((data_shot, label_shot, data_query),retSimMap=True)
+
+                torch.save(simMapQuer,"../results/{}/{}_simMapQuer{}.th".format(self.args.exp_id,self.args.model_id,i))
+                torch.save(simMapShot,"../results/{}/{}_simMapShot{}.th".format(self.args.exp_id,self.args.model_id,i))
+                torch.save(data_query,"../results/{}/{}_dataQuer{}.th".format(self.args.exp_id,self.args.model_id,i))
+                torch.save(data_shot,"../results/{}/{}_dataShot{}.th".format(self.args.exp_id,self.args.model_id,i))
+
+            else:
+                logits = self.model((data_shot, label_shot, data_query))
             acc = count_acc(logits, label)
             ave_acc.add(acc)
             test_acc_record[i-1] = acc
-            if i % 100 == 0:
-                print('batch {}: {:.2f}({:.2f})'.format(i, ave_acc.item() * 100, acc * 100))
 
         # Calculate the confidence interval, update the logs
         m, pm = compute_confidence_interval(test_acc_record)

@@ -87,6 +87,21 @@ def run(args,trial):
 
 def findBestTrial(args,pre):
 
+    bestTrial = getBestTrial(args,pre)
+
+    bestPreTrial = getBestTrial(args,True)
+    con = sqlite3.connect("../results/{}/{}_hypSearch.db".format(args.exp_id,args.pre_model_id))
+    curr = con.cursor()
+    curr.execute("SELECT param_value FROM trial_params WHERE trial_id == {} and param_name == 'nb_parts' ".format(bestPreTrial))
+    query_res = curr.fetchall()
+
+
+    best_part_nb = int(query_res[0][0])
+
+    return bestTrial,best_part_nb
+
+def getBestTrial(args,pre):
+
     id = args.pre_model_id if pre else args.model_id
 
     con = sqlite3.connect("../results/{}/{}_hypSearch.db".format(args.exp_id,id))
@@ -105,11 +120,30 @@ def findBestTrial(args,pre):
 
     bestTrial = trialIds[np.array(values).argmax()]
 
-    curr.execute("SELECT param_value FROM trial_params WHERE trial_id == {} and param_name == 'nb_parts' ".format(bestTrial))
-    query_res = curr.fetchall()
-    best_part_nb = int(query_res[0][0])
+    return bestTrial
 
-    return bestTrial,best_part_nb
+def setBestParams(args):
+
+    trialId = getBestTrial(args,False)
+
+    con = sqlite3.connect("../results/{}/{}_hypSearch.db".format(args.exp_id,args.model_id))
+    curr = con.cursor()
+
+    dic = vars(args)
+
+    params = {"meta_lr1":args.meta_lr1,"meta_lr2":args.meta_lr2,"base_lr":args.base_lr,\
+                "update_step":args.update_step,"step_size":args.step_size,"gamma":args.gamma}
+
+    for param in params:
+        print("SELECT param_value FROM trial_params WHERE trial_id == {} and param_name == '{}' ".format(trialId,param))
+        curr.execute("SELECT param_value FROM trial_params WHERE trial_id == {} and param_name == '{}' ".format(trialId,param))
+        query_res = curr.fetchall()
+        param_val = type(dic[param])(query_res[0][0])
+        params[param] = param_val
+
+    args.__dict__.update(params)
+
+    return args
 
 def writeConfigFile(args,filePath):
     """ Writes a config file containing all the arguments and their values"""
@@ -122,6 +156,7 @@ def writeConfigFile(args,filePath):
 
     with open(filePath, 'w') as f:
         config.write(f)
+
 
 
 if __name__ == '__main__':
@@ -231,8 +266,11 @@ if __name__ == '__main__':
     if args.phase == "meta_train":
         bestTrialId,args.nb_parts = findBestTrial(args,pre=False)
         args.eval_weights = "../models/{}/meta_{}_trial{}_max_acc.pth".format(args.exp_id,args.model_id,bestTrialId-1)
+        args.init_weights = "../models/{}/meta_{}_trial{}_max_acc.pth".format(args.exp_id,args.model_id,bestTrialId-1)
 
         copyfile(args.eval_weights, args.eval_weights.replace("_trial{}".format(bestTrialId-1),""))
+
+        args = setBestParams(args)
 
         trainer = MetaTrainer(args)
         trainer.eval()

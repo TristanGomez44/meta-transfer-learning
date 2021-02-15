@@ -38,3 +38,13 @@ class CategoriesSampler():
                 batch.append(l[pos])
             batch = torch.stack(batch).t().reshape(-1)
             yield batch
+
+    def hardBatch(self,worstClasses):
+
+        batch = []
+        for c in worstClasses:
+            l = self.m_ind[c]
+            pos = torch.randperm(len(l))[:self.n_per]
+            batch.append(l[pos])
+        batch = torch.stack(batch).t().reshape(-1)
+        return batch

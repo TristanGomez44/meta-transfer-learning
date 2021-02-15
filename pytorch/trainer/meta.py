@@ -76,7 +76,7 @@ class MetaTrainer(object):
             pretrained_dict = torch.load(osp.join(pre_save_path, 'max_acc.pth'))['params']
         pretrained_dict = {'encoder.'+k: v for k, v in pretrained_dict.items()}
         pretrained_dict = {k: v for k, v in pretrained_dict.items() if k in self.model_dict}
-        print(pretrained_dict.keys())
+
         self.model_dict.update(pretrained_dict)
         self.model.load_state_dict(self.model_dict)
 
@@ -120,6 +120,8 @@ class MetaTrainer(object):
         else:
             label_shot = label_shot.type(torch.LongTensor)
 
+        worstClasses = []
+
         # Start meta-train
         for epoch in range(1, self.args.max_epoch + 1):
             # Update learning rate
@@ -143,9 +145,9 @@ class MetaTrainer(object):
                 # Update global count number
                 global_count = global_count + 1
                 if torch.cuda.is_available():
-                    data, _ = [_.cuda() for _ in batch]
+                    data,targ = [_.cuda() for _ in batch]
                 else:
-                    data = batch[0]
+                    data,targ = batch
                 p = self.args.shot * self.args.way
                 data_shot, data_query = data[:p], data[p:]
                 # Output logits for model
@@ -168,6 +170,23 @@ class MetaTrainer(object):
                 self.optimizer.zero_grad()
                 loss.backward()
                 self.optimizer.step()
+
+                if self.args.hard_tasks:
+                    if len(worstClasses) == self.args.way:
+                        inds = self.train_sampler.hardBatch(worstClasses)
+                        batch = [self.trainset[i][0] for i in inds]
+                        data_shot, data_query = data[:p], data[p:]
+                        logits = self.model((data_shot, label_shot, data_query))
+                        loss = F.cross_entropy(logits, label)
+                        self.optimizer.zero_grad()
+                        loss.backward()
+                        self.optimizer.step()
+                        worstClasses = []
+                    else:
+                        error_mat = (logits.argmax(dim=1) == label).view(self.args.train_query,self.args.way)
+                        worst = error_mat.float().mean(dim=0).argmin()
+                        worst_trueInd = targ[worst]
+                        worstClasses.append(worst_trueInd)
 
             # Update the averagers
             train_loss_averager = train_loss_averager.item()
@@ -204,6 +223,8 @@ class MetaTrainer(object):
 
                 val_loss_averager.add(loss.item())
                 val_acc_averager.add(acc)
+
+                break
 
             # Update validation averagers
             val_loss_averager = val_loss_averager.item()

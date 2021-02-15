@@ -23,6 +23,15 @@ from utils.gpu_tools import set_gpu
 from trainer.meta import MetaTrainer
 from trainer.pre import PreTrainer
 
+def str2bool(v):
+    '''Convert a string to a boolean value'''
+    if v == 'True':
+        return True
+    elif v == 'False':
+        return False
+    else:
+        raise argparse.ArgumentTypeError('Boolean value expected.')
+
 def run(args,trial):
 
     #args.batch_size = trial.suggest_int("batch_size", 10, args.max_batch_size, log=True)
@@ -67,8 +76,11 @@ def run(args,trial):
 
     if args.phase == "meta_train":
         bestPreTrialNb,args.nb_parts = findBestTrial(args,pre=True)
+
+        if args.fix_trial_id:
+            bestPreTrialNb -= 1
+
         args.init_weights = "../models/{}/pre_{}_trial{}_max_acc.pth".format(args.exp_id,args.pre_model_id,bestPreTrialNb)
-        print("args.init_weights",args.init_weights)
 
         trainer = MetaTrainer(args)
         trainer.train(trial)
@@ -185,6 +197,10 @@ if __name__ == '__main__':
     parser.add_argument('--init_weights', type=str, default=None) # The pre-trained weights for meta-train phase
     parser.add_argument('--eval_weights', type=str, default=None) # The meta-trained weights for meta-eval phase
     parser.add_argument('--meta_label', type=str, default='exp1') # Additional label for meta-train
+    parser.add_argument('--hard_tasks', type=str2bool, default=False) # Whether to collect hard tasks
+    parser.add_argument('--fix_trial_id', type=str2bool, default=False) # Fix trial id issue where wrong trial is selected for init the meta phase
+
+
 
     # Parameters for pretain phase
     parser.add_argument('--pre_max_epoch', type=int, default=40) # Epoch number for pre-train phase
@@ -206,7 +222,6 @@ if __name__ == '__main__':
 
     # Set and print the parameters
     args = parser.parse_args()
-    pprint(vars(args))
 
     # Set the GPU id
     set_gpu(args.gpu)

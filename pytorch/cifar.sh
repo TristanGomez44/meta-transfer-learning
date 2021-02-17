@@ -5,8 +5,14 @@ case $1 in
   "pre_long")
     python3 main.py --dataset_dir datasets/cifar-FS/ --exp_id cifar --model_id pre_firstModel_long     --phase pre_train --optuna_trial_nb 50
     ;;
+  "pre_noRV")
+    python3 main.py --dataset_dir datasets/cifar-FS/ --exp_id cifar --model_id pre_firstModel_noRV     --phase pre_train --optuna_trial_nb 25 --rep_vec False
+    ;;
+  "long_noRV")
+    python3 main.py --dataset_dir datasets/cifar-FS/ --exp_id cifar --model_id firstModel_noRV     --phase meta_train --pre_model_id pre_firstModel_noRV --max_epoch 100 --optuna_trial_nb 50 --rep_vec False
+    ;;
   "long")
-    python3 main.py --dataset_dir datasets/cifar-FS/ --exp_id cifar --model_id firstModel_long     --phase meta_train --pre_model_id pre_firstModel --max_epoch 100 --optuna_trial_nb 50
+    python3 main.py --dataset_dir datasets/cifar-FS/ --exp_id cifar --model_id firstModel_long     --phase meta_train --pre_model_id pre_firstModel --max_epoch 100 --optuna_trial_nb 55
     ;;
   "long_fix")
     python3 main.py --dataset_dir datasets/cifar-FS/ --exp_id cifar --model_id firstModel_long_fix     --phase meta_train --pre_model_id pre_firstModel --max_epoch 100 --optuna_trial_nb 50 --fix_trial_id True

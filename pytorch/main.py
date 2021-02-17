@@ -60,7 +60,8 @@ def run(args,trial):
         args.pre_step_size = trial.suggest_int("pre_step_size",1,50, log=True)
         args.pre_custom_momentum = trial.suggest_float("pre_custom_momentum", 0.5, 0.99,log=True)
         args.pre_custom_weight_decay = trial.suggest_float("pre_custom_weight_decay", 1e-6, 1e-3, log=True)
-        args.nb_parts = trial.suggest_int("nb_parts", 3, 64, log=True)
+        if args.rep_vec:
+            args.nb_parts = trial.suggest_int("nb_parts", 3, 64, log=True)
 
         #parser.add_argument('--pre_max_epoch', type=int, default=100) # Epoch number for pre-train phase
         #parser.add_argument('--pre_batch_size', type=int, default=128) # Batch size for pre-train phase
@@ -199,7 +200,7 @@ if __name__ == '__main__':
     parser.add_argument('--meta_label', type=str, default='exp1') # Additional label for meta-train
     parser.add_argument('--hard_tasks', type=str2bool, default=False) # Whether to collect hard tasks
     parser.add_argument('--fix_trial_id', type=str2bool, default=False) # Fix trial id issue where wrong trial is selected for init the meta phase
-
+    parser.add_argument('--rep_vec', type=str2bool, default=True) # To use representative vectors
 
 
     # Parameters for pretain phase

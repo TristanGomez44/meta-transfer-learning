@@ -46,15 +46,18 @@ class MtlLearner(nn.Module):
         self.update_lr = args.base_lr
         self.update_step = args.update_step
         z_dim = 640
+        self.repVec = args.rep_vec
         self.nbVec = args.nb_parts
 
-        self.base_learner = BaseLearner(args, self.nbVec*z_dim)
+        featNb = self.nbVec*z_dim if args.rep_vec else z_dim
+
+        self.base_learner = BaseLearner(args,featNb)
 
         if self.mode == 'meta':
-            self.encoder = ResNetMtl(nbVec=self.nbVec)
+            self.encoder = ResNetMtl(repVec=args.rep_vec,nbVec=self.nbVec)
         else:
-            self.encoder = ResNetMtl(mtl=False,nbVec=self.nbVec)
-            self.pre_fc = nn.Sequential(nn.Linear(self.nbVec*z_dim, 1000), nn.ReLU(), nn.Linear(1000, num_cls))
+            self.encoder = ResNetMtl(mtl=False,repVec=args.rep_vec,nbVec=self.nbVec)
+            self.pre_fc = nn.Sequential(nn.Linear(featNb, 1000), nn.ReLU(), nn.Linear(1000, num_cls))
 
     def forward(self, inp,retSimMap=False):
         """The function to forward the model.

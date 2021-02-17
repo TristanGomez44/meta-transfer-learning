@@ -302,7 +302,7 @@ class MetaTrainer(object):
             k = self.args.way * self.args.shot
             data_shot, data_query = data[:k], data[k:]
 
-            if i % 100 == 0:
+            if i % 100 == 0 and self.args.rep_vec:
                 print('batch {}: {:.2f}({:.2f})'.format(i, ave_acc.item() * 100, acc * 100))
                 logits,simMapQuer,simMapShot = self.model((data_shot, label_shot, data_query),retSimMap=True)
 

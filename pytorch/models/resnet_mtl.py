@@ -163,7 +163,7 @@ class BottleneckMtl(nn.Module):
 
 class ResNetMtl(nn.Module):
 
-    def __init__(self, layers=[4, 4, 4], mtl=True,nbVec=3):
+    def __init__(self, layers=[4, 4, 4], mtl=True,repVec=True,nbVec=3):
         super(ResNetMtl, self).__init__()
         if mtl:
             self.Conv2d = Conv2dMtl
@@ -179,8 +179,9 @@ class ResNetMtl(nn.Module):
         self.layer1 = self._make_layer(block, cfg[0], layers[0], stride=2)
         self.layer2 = self._make_layer(block, cfg[1], layers[1], stride=2)
         self.layer3 = self._make_layer(block, cfg[2], layers[2], stride=2)
-        #self.avgpool = nn.AvgPool2d(10, stride=1)
+        self.avgpool = nn.AvgPool2d(10, stride=1)
         self.nbVec = nbVec
+        self.repVec = repVec
 
         for m in self.modules():
             if isinstance(m, self.Conv2d):
@@ -213,16 +214,15 @@ class ResNetMtl(nn.Module):
         x = self.layer2(x)
         x = self.layer3(x)
 
-        #x = self.avgpool(x)
+        if self.repVec and retSimMap:
+            x,simMap = representativeVectors(x,self.nbVec)
+            x = torch.cat(x,dim=-1)
 
-        x,simMap = representativeVectors(x,self.nbVec)
-        x = torch.cat(x,dim=-1)
-
-        #x = x.view(x.size(0), -1)
-        if retSimMap:
             retDict = {"x":x,"simMap":simMap}
             return retDict
         else:
+            x = self.avgpool(x)
+            x = x.view(x.size(0),-1)
             return x
 
 def representativeVectors(x,nbVec):

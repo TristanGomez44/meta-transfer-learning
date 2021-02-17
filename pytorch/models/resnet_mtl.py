@@ -214,15 +214,20 @@ class ResNetMtl(nn.Module):
         x = self.layer2(x)
         x = self.layer3(x)
 
-        if self.repVec and retSimMap:
+        if retSimMap:
+            norm = torch.sqrt(torch.pow(x,2).sum(dim=1,keepdim=True))
+
+        if self.repVec:
             x,simMap = representativeVectors(x,self.nbVec)
             x = torch.cat(x,dim=-1)
-
-            retDict = {"x":x,"simMap":simMap}
-            return retDict
         else:
             x = self.avgpool(x)
             x = x.view(x.size(0),-1)
+
+        if retSimMap:
+            retDict = {"x":x,"simMap":simMap,"norm":norm}
+            return retDict
+        else:
             return x
 
 def representativeVectors(x,nbVec):

@@ -304,12 +304,14 @@ class MetaTrainer(object):
 
             if i % 100 == 0 and self.args.rep_vec:
                 print('batch {}: {:.2f}({:.2f})'.format(i, ave_acc.item() * 100, acc * 100))
-                logits,simMapQuer,simMapShot = self.model((data_shot, label_shot, data_query),retSimMap=True)
+                logits,simMapQuer,simMapShot,normQuer,normShot = self.model((data_shot, label_shot, data_query),retSimMap=True)
 
                 torch.save(simMapQuer,"../results/{}/{}_simMapQuer{}.th".format(self.args.exp_id,self.args.model_id,i))
                 torch.save(simMapShot,"../results/{}/{}_simMapShot{}.th".format(self.args.exp_id,self.args.model_id,i))
                 torch.save(data_query,"../results/{}/{}_dataQuer{}.th".format(self.args.exp_id,self.args.model_id,i))
                 torch.save(data_shot,"../results/{}/{}_dataShot{}.th".format(self.args.exp_id,self.args.model_id,i))
+                torch.save(normQuer,"../results/{}/{}_normQuer{}.th".format(self.args.exp_id,self.args.model_id,i))
+                torch.save(normShot,"../results/{}/{}_normShot{}.th".format(self.args.exp_id,self.args.model_id,i))
 
             else:
                 logits = self.model((data_shot, label_shot, data_query))

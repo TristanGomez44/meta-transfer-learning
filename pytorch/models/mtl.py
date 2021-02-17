@@ -117,7 +117,7 @@ class MtlLearner(nn.Module):
             logits_q = self.base_learner(embedding_query, fast_weights)
 
         if retSimMap:
-            return logits_q,querDic["simMap"],shotDic["simMap"]
+            return logits_q,querDic["simMap"],shotDic["simMap"],querDic["norm"],shotDic["norm"]
         else:
             return logits_q
 

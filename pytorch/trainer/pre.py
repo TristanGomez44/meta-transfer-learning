@@ -19,6 +19,7 @@ from models.mtl import MtlLearner
 from utils.misc import Averager, Timer, count_acc, ensure_path
 from tensorboardX import SummaryWriter
 from dataloader.dataset_loader import DatasetLoader as Dataset
+import sys
 
 class PreTrainer(object):
     """The class that contains the code for the pretrain phase."""
@@ -52,7 +53,12 @@ class PreTrainer(object):
         num_class_pretrain = self.trainset.num_class
 
         # Build pretrain model
-        self.model = MtlLearner(self.args, mode='pre', num_cls=num_class_pretrain)
+        self.model = MtlLearner(self.args, mode='pre', num_cls=num_class_pretrain,res="high" if self.args.distill_id else "low")
+
+        if self.args.distill_id:
+            self.teacher = MtlLearner(self.args,mode="pre",res="low",repVecNb=self.args.nb_parts_teach,num_cls=num_class_pretrain)
+            bestTeach = "../models/{}/pre_{}_best_max_acc.pth".format(self.args.exp_id,self.args.distill_id)
+            self.teacher.load_state_dict(torch.load(bestTeach)["params"])
 
         # Set optimizer
         self.optimizer = torch.optim.SGD([{'params': self.model.encoder.parameters(), 'lr': self.args.pre_lr}, \
@@ -66,6 +72,8 @@ class PreTrainer(object):
         if torch.cuda.is_available():
             torch.backends.cudnn.benchmark = True
             self.model = self.model.cuda()
+            if self.args.distill_id:
+                self.teacher = self.teacher.cuda()
 
     def save_model(self, name):
         """The function to save checkpoints.
@@ -73,7 +81,10 @@ class PreTrainer(object):
           name: the name for saved checkpoint
         """
         #torch.save(dict(params=self.model.encoder.state_dict()), osp.join(self.args.save_path, name + '.pth'))
-        torch.save(dict(params=self.model.encoder.state_dict()), "../models/{}/pre_{}_trial{}_{}.pth".format(self.args.exp_id,self.args.model_id,self.args.trial_number,name))
+        if not self.args.best:
+            torch.save(dict(params=self.model.encoder.state_dict()), "../models/{}/pre_{}_trial{}_{}.pth".format(self.args.exp_id,self.args.model_id,self.args.trial_number,name))
+        else:
+            torch.save(dict(params=self.model.state_dict()), "../models/{}/pre_{}_best_{}.pth".format(self.args.exp_id,self.args.model_id,name))
 
     def train(self):
         """The function for the pre-train phase."""
@@ -124,6 +135,12 @@ class PreTrainer(object):
                 logits = self.model(data)
                 # Calculate train loss
                 loss = F.cross_entropy(logits, label)
+
+                if self.args.distill_id:
+                    teachLogits = self.teacher(data)
+                    kl = F.kl_div(F.log_softmax(logits/self.args.kl_temp, dim=1),F.softmax(teachLogits/self.args.kl_temp, dim=1),reduction="batchmean")
+                    loss = (kl*self.args.kl_interp*self.args.kl_temp*self.args.kl_temp+loss*(1-self.args.kl_interp))
+
                 # Calculate train accuracy
                 acc = count_acc(logits, label)
                 # Write the tensorboardX records

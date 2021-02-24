@@ -163,7 +163,7 @@ class BottleneckMtl(nn.Module):
 
 class ResNetMtl(nn.Module):
 
-    def __init__(self, layers=[4, 4, 4], mtl=True,repVec=True,nbVec=3):
+    def __init__(self, layers=[4, 4, 4], mtl=True,repVec=True,nbVec=3,res="high"):
         super(ResNetMtl, self).__init__()
         if mtl:
             self.Conv2d = Conv2dMtl
@@ -177,8 +177,8 @@ class ResNetMtl(nn.Module):
         self.bn1 = nn.BatchNorm2d(iChannels)
         self.relu = nn.ReLU(inplace=True)
         self.layer1 = self._make_layer(block, cfg[0], layers[0], stride=2)
-        self.layer2 = self._make_layer(block, cfg[1], layers[1], stride=2)
-        self.layer3 = self._make_layer(block, cfg[2], layers[2], stride=2)
+        self.layer2 = self._make_layer(block, cfg[1], layers[1], stride=2 if res=="low" else 1)
+        self.layer3 = self._make_layer(block, cfg[2], layers[2], stride=2 if res=="low" else 1)
         self.avgpool = nn.AvgPool2d(10, stride=1)
         self.nbVec = nbVec
         self.repVec = repVec

@@ -46,6 +46,10 @@ def run(args,trial):
         args.step_size = trial.suggest_int("step_size",1,50,log=True)
         args.gamma = trial.suggest_float("gamma",0.1,0.9,step=0.2)
 
+        if args.distill_id:
+            args.kl_temp = trial.suggest_float("kl_temp", 1, 21, step=5)
+            args.kl_interp = trial.suggest_float("kl_interp", 0.1, 1, step=0.1)
+
         #parser.add_argument('--meta_lr1', type=float, default=0.0001) # Learning rate for SS weights
         #parser.add_argument('--meta_lr2', type=float, default=0.001) # Learning rate for FC weights
         #parser.add_argument('--base_lr', type=float, default=0.01) # Learning rate for the inner loop
@@ -61,7 +65,16 @@ def run(args,trial):
         args.pre_custom_momentum = trial.suggest_float("pre_custom_momentum", 0.5, 0.99,log=True)
         args.pre_custom_weight_decay = trial.suggest_float("pre_custom_weight_decay", 1e-6, 1e-3, log=True)
         if args.rep_vec:
-            args.nb_parts = trial.suggest_int("nb_parts", 3, 64, log=True)
+            if not args.distill_id:
+                args.nb_parts = trial.suggest_int("nb_parts", 3, 64, log=True)
+            else:
+                args.nb_parts = 3
+                bestTeachPreTrial = _getBestTrial(args,args.exp_id,args.distill_id)
+                args.nb_parts_teach = getBestPartNb(bestTeachPreTrial,args.exp_id,args.distill_id)
+
+        if args.distill_id:
+            args.kl_temp = trial.suggest_float("kl_temp", 1, 21, step=5)
+            args.kl_interp = trial.suggest_float("kl_interp", 0.1, 1, step=0.1)
 
         #parser.add_argument('--pre_max_epoch', type=int, default=100) # Epoch number for pre-train phase
         #parser.add_argument('--pre_batch_size', type=int, default=128) # Batch size for pre-train phase
@@ -102,22 +115,28 @@ def findBestTrial(args,pre):
 
     bestTrial = getBestTrial(args,pre)
 
-    bestPreTrial = getBestTrial(args,True)
-    con = sqlite3.connect("../results/{}/{}_hypSearch.db".format(args.exp_id,args.pre_model_id))
-    curr = con.cursor()
-    curr.execute("SELECT param_value FROM trial_params WHERE trial_id == {} and param_name == 'nb_parts' ".format(bestPreTrial))
-    query_res = curr.fetchall()
-
-
-    best_part_nb = int(query_res[0][0])
+    if args.rep_vec:
+        bestPreTrial = getBestTrial(args,True)
+        best_part_nb = getBestPartNb(bestPreTrial,args.exp_id,args.pre_model_id)
+    else:
+        best_part_nb = None
 
     return bestTrial,best_part_nb
 
+def getBestPartNb(bestTrialId,exp_id,model_id):
+    con = sqlite3.connect("../results/{}/{}_hypSearch.db".format(exp_id,model_id))
+    curr = con.cursor()
+    curr.execute("SELECT param_value FROM trial_params WHERE trial_id == {} and param_name == 'nb_parts' ".format(bestTrialId))
+    query_res = curr.fetchall()
+    best_part_nb = int(query_res[0][0])
+    return best_part_nb
+
 def getBestTrial(args,pre):
-
     id = args.pre_model_id if pre else args.model_id
+    return _getBestTrial(args,args.exp_id,id)
 
-    con = sqlite3.connect("../results/{}/{}_hypSearch.db".format(args.exp_id,id))
+def _getBestTrial(args,exp_id,model_id):
+    con = sqlite3.connect("../results/{}/{}_hypSearch.db".format(exp_id,model_id))
     curr = con.cursor()
 
     curr.execute('SELECT trial_id,value FROM trials WHERE study_id == 1')
@@ -135,6 +154,7 @@ def getBestTrial(args,pre):
 
     return bestTrial
 
+
 def setBestParams(args):
 
     trialId = getBestTrial(args,False)
@@ -144,8 +164,13 @@ def setBestParams(args):
 
     dic = vars(args)
 
-    params = {"meta_lr1":args.meta_lr1,"meta_lr2":args.meta_lr2,"base_lr":args.base_lr,\
+    if args.phase == "meta_train":
+        params = {"meta_lr1":args.meta_lr1,"meta_lr2":args.meta_lr2,"base_lr":args.base_lr,\
                 "update_step":args.update_step,"step_size":args.step_size,"gamma":args.gamma}
+    else:
+        params = {"pre_batch_size":args.pre_batch_size,"pre_lr":args.pre_lr,"pre_gamma":args.pre_gamma,\
+                    "pre_step_size":args.pre_step_size,"pre_custom_momentum":args.pre_custom_momentum,\
+                    "pre_custom_weight_decay":args.pre_custom_weight_decay,"nb_parts":args.nb_parts}
 
     for param in params:
         print("SELECT param_value FROM trial_params WHERE trial_id == {} and param_name == '{}' ".format(trialId,param))
@@ -182,6 +207,8 @@ if __name__ == '__main__':
     parser.add_argument('--gpu', default='1') # GPU id
     parser.add_argument('--dataset_dir', type=str, default='./data/mini/') # Dataset folder
 
+    parser.add_argument('--distill_id', type=str) # model_id of the model to distill
+
     # Parameters for meta-train phase
     parser.add_argument('--max_epoch', type=int, default=50) # Epoch number for meta-train phase
     parser.add_argument('--num_batch', type=int, default=100) # The number for different tasks used for meta-train
@@ -201,7 +228,7 @@ if __name__ == '__main__':
     parser.add_argument('--hard_tasks', type=str2bool, default=False) # Whether to collect hard tasks
     parser.add_argument('--fix_trial_id', type=str2bool, default=False) # Fix trial id issue where wrong trial is selected for init the meta phase
     parser.add_argument('--rep_vec', type=str2bool, default=True) # To use representative vectors
-
+    parser.add_argument('--best', type=str2bool, default=False) # repeat best training
 
     # Parameters for pretain phase
     parser.add_argument('--pre_max_epoch', type=int, default=40) # Epoch number for pre-train phase
@@ -245,6 +272,7 @@ if __name__ == '__main__':
 
     writeConfigFile(args,"../models/{}/{}.ini".format(args.exp_id, args.model_id))
 
+if not args.best:
     def objective(trial):
         return run(args,trial=trial)
 
@@ -290,3 +318,9 @@ if __name__ == '__main__':
 
         trainer = MetaTrainer(args)
         trainer.eval()
+else:
+    args = setBestParams(args)
+    trainer = PreTrainer(args)
+    val = trainer.train()
+
+    print("--------- Best training ended with {} % accuracy".format(val))

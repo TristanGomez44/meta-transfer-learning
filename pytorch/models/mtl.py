@@ -39,7 +39,7 @@ class BaseLearner(nn.Module):
 
 class MtlLearner(nn.Module):
     """The class for outer loop."""
-    def __init__(self, args, mode='meta', num_cls=64):
+    def __init__(self, args, mode='meta', num_cls=64,res="high",repVecNb=None):
         super().__init__()
         self.args = args
         self.mode = mode
@@ -47,16 +47,17 @@ class MtlLearner(nn.Module):
         self.update_step = args.update_step
         z_dim = 640
         self.repVec = args.rep_vec
-        self.nbVec = args.nb_parts
+
+        self.nbVec = args.nb_parts if repVecNb is None else repVecNb
 
         featNb = self.nbVec*z_dim if args.rep_vec else z_dim
 
         self.base_learner = BaseLearner(args,featNb)
 
         if self.mode == 'meta':
-            self.encoder = ResNetMtl(repVec=args.rep_vec,nbVec=self.nbVec)
+            self.encoder = ResNetMtl(repVec=args.rep_vec,nbVec=self.nbVec,res=res)
         else:
-            self.encoder = ResNetMtl(mtl=False,repVec=args.rep_vec,nbVec=self.nbVec)
+            self.encoder = ResNetMtl(mtl=False,repVec=args.rep_vec,nbVec=self.nbVec,res=res)
             self.pre_fc = nn.Sequential(nn.Linear(featNb, 1000), nn.ReLU(), nn.Linear(1000, num_cls))
 
     def forward(self, inp,retSimMap=False):

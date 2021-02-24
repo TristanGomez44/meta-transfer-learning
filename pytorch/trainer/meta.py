@@ -55,7 +55,11 @@ class MetaTrainer(object):
         self.val_loader = DataLoader(dataset=self.valset, batch_sampler=self.val_sampler, num_workers=args.num_workers, pin_memory=True)
 
         # Build meta-transfer learning model
-        self.model = MtlLearner(self.args)
+        self.model = MtlLearner(self.args,res="high" if not args.distill else "low")
+
+        if self.args.distill:
+            self.teacher = MtlLearner(self.args,res="low")
+            self.teacher.load_state_dict(torch.load(args.distill)["params"])
 
         # Set optimizer
         self.optimizer = torch.optim.Adam([{'params': filter(lambda p: p.requires_grad, self.model.encoder.parameters())}, \
@@ -155,6 +159,12 @@ class MetaTrainer(object):
                 # Calculate meta-train loss
                 loss = F.cross_entropy(logits, label)
                 # Calculate meta-train accuracy
+
+                if self.args.distill:
+                    teachLogits = self.teacher((data_shot, label_shot, data_query))
+                    kl = F.kl_div(F.log_softmax(logits/self.args.kl_temp, dim=1),F.softmax(teachLogits/self.args.kl_temp, dim=1),reduction="batchmean")
+                    loss = (kl*self.args.kl_interp*self.args.kl_temp*self.args.kl_temp+loss*(1-self.args.kl_interp))
+
                 acc = count_acc(logits, label)
                 # Write the tensorboardX records
                 writer.add_scalar('data/loss', float(loss), global_count)
@@ -223,8 +233,6 @@ class MetaTrainer(object):
 
                 val_loss_averager.add(loss.item())
                 val_acc_averager.add(acc)
-
-                break
 
             # Update validation averagers
             val_loss_averager = val_loss_averager.item()

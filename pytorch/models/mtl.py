@@ -28,18 +28,21 @@ class BaseLearner(nn.Module):
 
     def forward(self, input_x, the_vars=None):
         if the_vars is None:
-            the_vars = self.vars
+            #the_vars = self.vars
+            the_vars = [self.fc1_w,self.fc1_b]
+
         fc1_w = the_vars[0]
         fc1_b = the_vars[1]
         net = F.linear(input_x, fc1_w, fc1_b)
         return net
 
     def parameters(self):
-        return self.vars
+        #return self.vars
+        return [self.fc1_w,self.fc1_b]
 
 class MtlLearner(nn.Module):
     """The class for outer loop."""
-    def __init__(self, args, mode='meta', num_cls=64,res="high",repVecNb=None):
+    def __init__(self, args, mode='meta', num_cls=64,res="high",repVecNb=None,multi_gpu=False):
         super().__init__()
         self.args = args
         self.mode = mode
@@ -56,9 +59,15 @@ class MtlLearner(nn.Module):
 
         if self.mode == 'meta':
             self.encoder = ResNetMtl(repVec=args.rep_vec,nbVec=self.nbVec,res=res)
+            self.pre_fc = None
         else:
             self.encoder = ResNetMtl(mtl=False,repVec=args.rep_vec,nbVec=self.nbVec,res=res)
             self.pre_fc = nn.Sequential(nn.Linear(featNb, 1000), nn.ReLU(), nn.Linear(1000, num_cls))
+
+        if multi_gpu:
+            self.encoder = nn.DataParallel(self.encoder)
+            #self.pre_fc = nn.DataParallel(self.pre_fc) if not self.pre_fc is None else None
+            #self.base_learner = nn.DataParallel(self.base_learner)
 
     def forward(self, inp,retSimMap=False):
         """The function to forward the model.
@@ -104,6 +113,7 @@ class MtlLearner(nn.Module):
         else:
             embedding_query = self.encoder(data_query,retSimMap)
             embedding_shot = self.encoder(data_shot,retSimMap)
+
         logits = self.base_learner(embedding_shot)
         loss = F.cross_entropy(logits, label_shot)
         grad = torch.autograd.grad(loss, self.base_learner.parameters())

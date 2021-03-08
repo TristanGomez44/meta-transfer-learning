@@ -21,6 +21,8 @@ from models.mtl import MtlLearner
 from utils.misc import Averager, Timer, count_acc, compute_confidence_interval, ensure_path
 from tensorboardX import SummaryWriter
 from dataloader.dataset_loader import DatasetLoader as Dataset
+from gradcam import GradCAM
+
 
 class MetaTrainer(object):
     """The class that contains the code for the meta-train phase and meta-eval phase."""
@@ -55,11 +57,15 @@ class MetaTrainer(object):
         self.val_loader = DataLoader(dataset=self.valset, batch_sampler=self.val_sampler, num_workers=args.num_workers, pin_memory=True)
 
         # Build meta-transfer learning model
-        self.model = MtlLearner(self.args,res="high" if not args.distill else "low")
+        self.model = MtlLearner(self.args,res="high" if (self.args.distill_id or self.args.high_res) else "low",multi_gpu=len(args.gpu.split(","))>1)
 
-        if self.args.distill:
-            self.teacher = MtlLearner(self.args,res="low")
-            self.teacher.load_state_dict(torch.load(args.distill)["params"])
+        if self.args.distill_id:
+            #self.teacher = MtlLearner(self.args,res="low")
+            #self.teacher.load_state_dict(torch.load(args.distill_id)["params"])
+
+            self.teacher = MtlLearner(self.args,res="low",repVecNb=self.args.nb_parts_teach,multi_gpu=len(args.gpu.split(","))>1)
+            bestTeach = "../models/{}/meta_{}_trial{}_max_acc.pth".format(self.args.exp_id,self.args.distill_id,self.args.best_trial_teach-1)
+            self.teacher.load_state_dict(torch.load(bestTeach)["params"])
 
         # Set optimizer
         self.optimizer = torch.optim.Adam([{'params': filter(lambda p: p.requires_grad, self.model.encoder.parameters())}, \
@@ -71,23 +77,20 @@ class MetaTrainer(object):
         self.model_dict = self.model.state_dict()
         if self.args.init_weights is not None:
             pretrained_dict = torch.load(self.args.init_weights)['params']
-        else:
-            pre_base_dir = osp.join(log_base_dir, 'pre')
-            pre_save_path1 = '_'.join([args.dataset, args.model_type])
-            pre_save_path2 = 'batchsize' + str(args.pre_batch_size) + '_lr' + str(args.pre_lr) + '_gamma' + str(args.pre_gamma) + '_step' + \
-                str(args.pre_step_size) + '_maxepoch' + str(args.pre_max_epoch)
-            pre_save_path = pre_base_dir + '/' + pre_save_path1 + '_' + pre_save_path2
-            pretrained_dict = torch.load(osp.join(pre_save_path, 'max_acc.pth'))['params']
-        pretrained_dict = {'encoder.'+k: v for k, v in pretrained_dict.items()}
-        pretrained_dict = {k: v for k, v in pretrained_dict.items() if k in self.model_dict}
 
-        self.model_dict.update(pretrained_dict)
-        self.model.load_state_dict(self.model_dict)
+            pretrained_dict = {'encoder.'+k: v for k, v in pretrained_dict.items()}
+            pretrained_dict = {k: v for k, v in pretrained_dict.items() if k in self.model_dict}
+
+            self.model_dict.update(pretrained_dict)
+            self.model.load_state_dict(self.model_dict)
 
         # Set model to GPU
         if torch.cuda.is_available():
             torch.backends.cudnn.benchmark = True
             self.model = self.model.cuda()
+
+            if self.args.distill_id:
+                self.teacher = self.teacher.cuda()
 
     def save_model(self, name):
         """The function to save checkpoints.
@@ -160,7 +163,7 @@ class MetaTrainer(object):
                 loss = F.cross_entropy(logits, label)
                 # Calculate meta-train accuracy
 
-                if self.args.distill:
+                if self.args.distill_id:
                     teachLogits = self.teacher((data_shot, label_shot, data_query))
                     kl = F.kl_div(F.log_softmax(logits/self.args.kl_temp, dim=1),F.softmax(teachLogits/self.args.kl_temp, dim=1),reduction="batchmean")
                     loss = (kl*self.args.kl_interp*self.args.kl_temp*self.args.kl_temp+loss*(1-self.args.kl_interp))
@@ -268,19 +271,23 @@ class MetaTrainer(object):
     def eval(self):
         """The function for the meta-eval phase."""
         # Load the logs
-        trlog = torch.load(osp.join(self.args.save_path, 'trlog'))
+        if os.path.exists(osp.join(self.args.save_path, 'trlog')):
+            trlog = torch.load(osp.join(self.args.save_path, 'trlog'))
+        else:
+            trlog = None
 
         # Load meta-test set
         test_set = Dataset('test', self.args)
-        sampler = CategoriesSampler(test_set.label, 600, self.args.way, self.args.shot + self.args.val_query)
+        sampler = CategoriesSampler(test_set.label, 1200, self.args.way, self.args.shot + self.args.val_query)
         loader = DataLoader(test_set, batch_sampler=sampler, num_workers=8, pin_memory=True)
 
         # Set test accuracy recorder
-        test_acc_record = np.zeros((600,))
+        test_acc_record = np.zeros((1200,))
 
         # Load model for meta-test phase
         if self.args.eval_weights is not None:
-            self.model.load_state_dict(torch.load(self.args.eval_weights)['params'])
+            weights = self.addOrRemoveModule(self.model,torch.load(self.args.eval_weights)['params'])
+            self.model.load_state_dict(weights)
         else:
             self.model.load_state_dict(torch.load(osp.join(self.args.save_path, 'max_acc' + '.pth'))['params'])
         # Set model to eval mode
@@ -301,6 +308,10 @@ class MetaTrainer(object):
         else:
             label_shot = label_shot.type(torch.LongTensor)
 
+        self.model.layer3 = self.model.encoder.layer3
+        model_dict = dict(type="resnet", arch=self.model, layer_name='layer3')
+        grad_cam = GradCAM(model_dict, True)
+
         # Start meta-test
         for i, batch in enumerate(loader, 1):
             if torch.cuda.is_available():
@@ -310,7 +321,7 @@ class MetaTrainer(object):
             k = self.args.way * self.args.shot
             data_shot, data_query = data[:k], data[k:]
 
-            if i % 100 == 0 and self.args.rep_vec:
+            if i % 5 == 0 and self.args.rep_vec:
                 print('batch {}: {:.2f}({:.2f})'.format(i, ave_acc.item() * 100, acc * 100))
                 logits,simMapQuer,simMapShot,normQuer,normShot = self.model((data_shot, label_shot, data_query),retSimMap=True)
 
@@ -321,15 +332,59 @@ class MetaTrainer(object):
                 torch.save(normQuer,"../results/{}/{}_normQuer{}.th".format(self.args.exp_id,self.args.model_id,i))
                 torch.save(normShot,"../results/{}/{}_normShot{}.th".format(self.args.exp_id,self.args.model_id,i))
 
+                masks = grad_cam(logits=logits)
+                torch.save(masks,"../results/{}/{}_gradcamQuer{}.th".format(self.args.exp_id,self.args.model_id,i))
+
             else:
                 logits = self.model((data_shot, label_shot, data_query))
+
             acc = count_acc(logits, label)
             ave_acc.add(acc)
             test_acc_record[i-1] = acc
 
         # Calculate the confidence interval, update the logs
         m, pm = compute_confidence_interval(test_acc_record)
-        print('Val Best Epoch {}, Acc {:.4f}, Test Acc {:.4f}'.format(trlog['max_acc_epoch'], trlog['max_acc'], ave_acc.item()))
+        if trlog is not None:
+            print('Val Best Epoch {}, Acc {:.4f}, Test Acc {:.4f}'.format(trlog['max_acc_epoch'], trlog['max_acc'], ave_acc.item()))
         print('Test Acc {:.4f} + {:.4f}'.format(m, pm))
 
         return m
+
+    def addOrRemoveModule(self,net,weights):
+
+        exKeyWei = None
+        for key in weights:
+            if key.find("encoder") != -1:
+                exKeyWei = key
+                break
+            else:
+                print(key)
+
+        exKeyNet = None
+        for key in net.state_dict():
+            if key.find("encoder") != -1:
+                exKeyNet = key
+                break
+
+        print(exKeyWei,exKeyNet)
+
+        if exKeyWei.find("module") != -1 and exKeyNet.find("module") == -1:
+            #remove module
+            newWeights = {}
+            for param in weights:
+                newWeights[param.replace("module.","")] = weights[param]
+            weights = newWeights
+
+        if exKeyWei.find("module") == -1 and exKeyNet.find("module") != -1:
+            #add module
+            newWeights = {}
+            for param in weights:
+                if param.find("encoder") != -1:
+                    param_split = param.split(".")
+                    newParam = param_split[0]+"."+"module."+".".join(param_split[1:])
+                    newWeights[newParam] = weights[param]
+                else:
+                    newWeights[param] = weights[param]
+            weights = newWeights
+
+        return weights

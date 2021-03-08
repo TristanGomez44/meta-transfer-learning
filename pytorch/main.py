@@ -34,10 +34,6 @@ def str2bool(v):
 
 def run(args,trial):
 
-    #args.batch_size = trial.suggest_int("batch_size", 10, args.max_batch_size, log=True)
-    #args.weight_decay = trial.suggest_float("weight_decay", 1e-6, 1e-3, log=True)
-
-    #meta-train
     if args.phase == "meta_train":
         args.meta_lr1 = trial.suggest_float("meta_lr1",1e-5, 1e-3, log=True)
         args.meta_lr2 = trial.suggest_float("meta_lr2",1e-4, 1e-2, log=True)
@@ -45,19 +41,18 @@ def run(args,trial):
         args.update_step = trial.suggest_int("update_step",10,100,log=True)
         args.step_size = trial.suggest_int("step_size",1,50,log=True)
         args.gamma = trial.suggest_float("gamma",0.1,0.9,step=0.2)
+        if args.rep_vec:
+            if args.distill_id:
+                bestTeachPreTrial = _getBestTrial(args,args.exp_id,args.distill_id_pre)
+                print("bestTeachPreTrial",bestTeachPreTrial)
+                args.nb_parts_teach = getBestPartNb(bestTeachPreTrial,args.exp_id,args.distill_id_pre)
+                args.best_trial_teach = _getBestTrial(args,args.exp_id,args.distill_id)
 
         if args.distill_id:
             args.kl_temp = trial.suggest_float("kl_temp", 1, 21, step=5)
             args.kl_interp = trial.suggest_float("kl_interp", 0.1, 1, step=0.1)
 
-        #parser.add_argument('--meta_lr1', type=float, default=0.0001) # Learning rate for SS weights
-        #parser.add_argument('--meta_lr2', type=float, default=0.001) # Learning rate for FC weights
-        #parser.add_argument('--base_lr', type=float, default=0.01) # Learning rate for the inner loop
-        #parser.add_argument('--update_step', type=int, default=50) # The number of updates for the inner loop
-        #parser.add_argument('--step_size', type=int, default=10) # The number of epochs to reduce the meta learning rates
-        #parser.add_argument('--gamma', type=float, default=0.5) # Gamma for the meta-train learning rate decay
     elif args.phase == "pre_train":
-        # pretrain
         args.pre_batch_size = trial.suggest_int("pre_batch_size",8, args.max_batch_size, log=True)
         args.pre_lr = trial.suggest_float("pre_lr",1e-4, 1e-1, log=True)
         args.pre_gamma = trial.suggest_float("pre_gamma",0.05,0.25,step=0.05)
@@ -76,20 +71,18 @@ def run(args,trial):
             args.kl_temp = trial.suggest_float("kl_temp", 1, 21, step=5)
             args.kl_interp = trial.suggest_float("kl_interp", 0.1, 1, step=0.1)
 
-        #parser.add_argument('--pre_max_epoch', type=int, default=100) # Epoch number for pre-train phase
-        #parser.add_argument('--pre_batch_size', type=int, default=128) # Batch size for pre-train phase
-        #parser.add_argument('--pre_lr', type=float, default=0.1) # Learning rate for pre-train phase
-        #parser.add_argument('--pre_gamma', type=float, default=0.2) # Gamma for the pre-train learning rate decay
-        #parser.add_argument('--pre_step_size', type=int, default=30) # The number of epochs to reduce the pre-train learning rate
-        #parser.add_argument('--pre_custom_momentum', type=float, default=0.9) # Momentum for the optimizer during pre-train
-        #parser.add_argument('--pre_custom_weight_decay', type=float, default=0.0005) # Weight decay for the optimizer during pre-train
     else:
         raise ValueError("Unkown phase",args.phase)
 
     args.trial_number = trial.number
 
     if args.phase == "meta_train":
-        bestPreTrialNb,args.nb_parts = findBestTrial(args,pre=True)
+
+        if not args.distill_id:
+            bestPreTrialNb,args.nb_parts = findBestTrial(args,pre=True)
+        else:
+            bestPreTrialNb = getBestTrial(args,pre=True)
+            args.nb_parts = 3
 
         if args.fix_trial_id:
             bestPreTrialNb -= 1
@@ -100,6 +93,10 @@ def run(args,trial):
         trainer.train(trial)
 
         args.eval_weights = "../models/{}/meta_{}_trial{}_max_acc.pth".format(args.exp_id,args.model_id,trial.number)
+
+        if args.distill_id:
+            trainer.teacher = None
+
         val = trainer.eval()
 
     elif args.phase == "pre_train":
@@ -124,6 +121,7 @@ def findBestTrial(args,pre):
     return bestTrial,best_part_nb
 
 def getBestPartNb(bestTrialId,exp_id,model_id):
+    print(bestTrialId,exp_id,model_id)
     con = sqlite3.connect("../results/{}/{}_hypSearch.db".format(exp_id,model_id))
     curr = con.cursor()
     curr.execute("SELECT param_value FROM trial_params WHERE trial_id == {} and param_name == 'nb_parts' ".format(bestTrialId))
@@ -136,6 +134,7 @@ def getBestTrial(args,pre):
     return _getBestTrial(args,args.exp_id,id)
 
 def _getBestTrial(args,exp_id,model_id):
+    print("../results/{}/{}_hypSearch.db".format(exp_id,model_id))
     con = sqlite3.connect("../results/{}/{}_hypSearch.db".format(exp_id,model_id))
     curr = con.cursor()
 
@@ -144,8 +143,34 @@ def _getBestTrial(args,exp_id,model_id):
 
     query_res = list(filter(lambda x:not x[1] is None,query_res))
 
-    trialIds = [id_value[0] for id_value in query_res]
-    values = [id_value[1] for id_value in query_res]
+    if len(query_res) == 0:
+        print("Query length is zero")
+
+        curr.execute('SELECT trial_id,value FROM trial_values')
+        query_res = curr.fetchall()
+        query_res = list(filter(lambda x:not x[1] is None,query_res))
+
+        trialIds = [id_value[0] for id_value in query_res]
+        values = [id_value[1] for id_value in query_res]
+
+        bestDic = {}
+        for i in range(len(trialIds)):
+            if trialIds[i] in bestDic:
+                if values[i] > bestDic[trialIds[i]]:
+                    bestDic[trialIds[i]] = values[i]
+            else:
+                bestDic[trialIds[i]] = values[i]
+
+        trialIds = list(bestDic.keys())
+        values = [bestDic[id] for id in trialIds]
+
+        print(trialIds)
+        print(values)
+
+    else:
+
+        trialIds = [id_value[0] for id_value in query_res]
+        values = [id_value[1] for id_value in query_res]
 
     trialIds = trialIds[:args.optuna_trial_nb]
     values = values[:args.optuna_trial_nb]
@@ -208,6 +233,7 @@ if __name__ == '__main__':
     parser.add_argument('--dataset_dir', type=str, default='./data/mini/') # Dataset folder
 
     parser.add_argument('--distill_id', type=str) # model_id of the model to distill
+    parser.add_argument('--distill_id_pre', type=str) # pre_model_id of the model to distill
 
     # Parameters for meta-train phase
     parser.add_argument('--max_epoch', type=int, default=50) # Epoch number for meta-train phase
@@ -222,13 +248,18 @@ if __name__ == '__main__':
     parser.add_argument('--update_step', type=int, default=50) # The number of updates for the inner loop
     parser.add_argument('--step_size', type=int, default=10) # The number of epochs to reduce the meta learning rates
     parser.add_argument('--gamma', type=float, default=0.5) # Gamma for the meta-train learning rate decay
+    parser.add_argument('--kl_interp', type=float, default=0.4)
+    parser.add_argument('--kl_temp', type=float, default=16.0)
+
     parser.add_argument('--init_weights', type=str, default=None) # The pre-trained weights for meta-train phase
     parser.add_argument('--eval_weights', type=str, default=None) # The meta-trained weights for meta-eval phase
     parser.add_argument('--meta_label', type=str, default='exp1') # Additional label for meta-train
     parser.add_argument('--hard_tasks', type=str2bool, default=False) # Whether to collect hard tasks
     parser.add_argument('--fix_trial_id', type=str2bool, default=False) # Fix trial id issue where wrong trial is selected for init the meta phase
     parser.add_argument('--rep_vec', type=str2bool, default=True) # To use representative vectors
-    parser.add_argument('--best', type=str2bool, default=False) # repeat best training
+    parser.add_argument('--best', type=str2bool, default=False) # repeat best training or evaluate best model if phase == meta_train
+    parser.add_argument('--high_res', type=str2bool, default=False) # to set the model in high resolution
+    parser.add_argument('--trial_id', type=int, default=None) # the trial id to evaluate when using the --best option.
 
     # Parameters for pretain phase
     parser.add_argument('--pre_max_epoch', type=int, default=40) # Epoch number for pre-train phase
@@ -299,11 +330,16 @@ if not args.best:
                 study.optimize(objective,n_trials=args.optuna_trial_nb-trialsAlreadyDone+failedTrials)
                 studyDone = True
             except RuntimeError as e:
-                print("------- Max batch size was {} -------".format(args.max_batch_size))
                 if str(e).find("CUDA out of memory.") != -1:
                     gc.collect()
                     torch.cuda.empty_cache()
-                    args.max_batch_size -= 5
+
+                    if args.phase == "meta_train":
+                        print("------- Train query was {} -------".format(args.max_batch_size))
+                        args.train_query -= 1
+                    else:
+                        print("------- Max batch size was {} -------".format(args.max_batch_size))
+                        args.max_batch_size -= 5
                 else:
                     raise RuntimeError(e)
 
@@ -319,8 +355,22 @@ if not args.best:
         trainer = MetaTrainer(args)
         trainer.eval()
 else:
-    args = setBestParams(args)
-    trainer = PreTrainer(args)
-    val = trainer.train()
+    if args.phase == "meta_train":
+
+        if args.trial_id is None:
+            trial_id = getBestTrial(args,pre=False)
+        else:
+            trial_id = args.trial_id
+
+        args.nb_parts = 3
+        args.eval_weights = "../models/{}/meta_{}_trial{}_max_acc.pth".format(args.exp_id,args.model_id,trial_id-1)
+
+        trainer = MetaTrainer(args)
+        val = trainer.eval()
+
+    else:
+        args = setBestParams(args)
+        trainer = PreTrainer(args)
+        val = trainer.train()
 
     print("--------- Best training ended with {} % accuracy".format(val))

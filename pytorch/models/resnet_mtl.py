@@ -179,10 +179,10 @@ class ResNetMtl(nn.Module):
         self.layer1 = self._make_layer(block, cfg[0], layers[0], stride=2)
         self.layer2 = self._make_layer(block, cfg[1], layers[1], stride=2 if res=="low" else 1)
         self.layer3 = self._make_layer(block, cfg[2], layers[2], stride=2 if res=="low" else 1)
-        self.avgpool = nn.AvgPool2d(10, stride=1)
+        self.avgpool = nn.AdaptiveAvgPool2d(1)
         self.nbVec = nbVec
         self.repVec = repVec
-
+        self.res = res
         for m in self.modules():
             if isinstance(m, self.Conv2d):
                 nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
@@ -213,6 +213,9 @@ class ResNetMtl(nn.Module):
         x = self.layer1(x)
         x = self.layer2(x)
         x = self.layer3(x)
+
+        if self.res == "high":
+            x = x[:,:,2:-2,2:-2]
 
         if retSimMap:
             norm = torch.sqrt(torch.pow(x,2).sum(dim=1,keepdim=True))

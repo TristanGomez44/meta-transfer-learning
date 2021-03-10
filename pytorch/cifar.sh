@@ -8,8 +8,14 @@ case $1 in
   "pre_long")
     python3 main.py --dataset_dir datasets/cifar-FS/ --exp_id cifar --model_id pre_firstModel_long     --phase pre_train --optuna_trial_nb 50
     ;;
+  "pre_long_fc100_merged")
+    python3 main.py --dataset_dir datasets/FC100/ --exp_id fc100 --model_id pre_firstModel_long_merged     --phase pre_train --optuna_trial_nb 25 --repvec_merge True
+    ;;
   "pre_long_fc100")
     python3 main.py --dataset_dir datasets/FC100/ --exp_id fc100 --model_id pre_firstModel_long     --phase pre_train --optuna_trial_nb 25
+    ;;
+  "pre_longer_fc100")
+    python3 main.py --dataset_dir datasets/FC100/ --exp_id fc100 --model_id pre_firstModel_longer     --phase pre_train --optuna_trial_nb 50
     ;;
   "long_fc100")
     python3 main.py --dataset_dir datasets/FC100/ --exp_id fc100 --model_id firstModel_long     --phase meta_train --pre_model_id pre_firstModel_long --max_epoch 100 --optuna_trial_nb 55

@@ -13,6 +13,10 @@ import torch.nn as nn
 import torch
 from models.conv2d_mtl import Conv2dMtl
 
+def conv1x1(in_planes, out_planes, stride=1):
+    return nn.Conv2d(in_planes, out_planes, kernel_size=1, stride=stride,
+                     padding=0, bias=False)
+
 def conv3x3(in_planes, out_planes, stride=1):
     return nn.Conv2d(in_planes, out_planes, kernel_size=3, stride=stride,
                      padding=1, bias=False)
@@ -86,10 +90,14 @@ class Bottleneck(nn.Module):
 
         return out
 
+
+def conv1x1mtl(in_planes, out_planes, stride=1):
+    return Conv2dMtl(in_planes, out_planes, kernel_size=1, stride=stride,
+                     padding=1, bias=False)
+
 def conv3x3mtl(in_planes, out_planes, stride=1):
     return Conv2dMtl(in_planes, out_planes, kernel_size=3, stride=stride,
                      padding=1, bias=False)
-
 
 class BasicBlockMtl(nn.Module):
     expansion = 1
@@ -163,14 +171,17 @@ class BottleneckMtl(nn.Module):
 
 class ResNetMtl(nn.Module):
 
-    def __init__(self, layers=[4, 4, 4], mtl=True,repVec=True,nbVec=3,res="high"):
+    def __init__(self, layers=[4, 4, 4], mtl=True,repVec=True,nbVec=3,res="high",repvec_merge=False):
         super(ResNetMtl, self).__init__()
         if mtl:
             self.Conv2d = Conv2dMtl
             block = BasicBlockMtl
+            self.conv1x1 = conv1x1mtl
         else:
             self.Conv2d = nn.Conv2d
             block = BasicBlock
+            self.conv1x1 = conv1x1
+
         cfg = [160, 320, 640]
         self.inplanes = iChannels = int(cfg[0]/2)
         self.conv1 = self.Conv2d(3, iChannels, kernel_size=3, stride=1, padding=1)
@@ -189,6 +200,36 @@ class ResNetMtl(nn.Module):
             elif isinstance(m, nn.BatchNorm2d):
                 nn.init.constant_(m.weight, 1)
                 nn.init.constant_(m.bias, 0)
+
+        self.repvec_merge = repvec_merge
+        if repvec_merge:
+
+            if self.nbVec == 3:
+                half = nn.Linear(cfg[2],cfg[2]//2)
+                quarter = nn.Linear(cfg[2],cfg[2]//4)
+                self.vec1 = half
+                self.vec2 = quarter
+                self.vec3 = quarter
+            elif self.nbVec == 5:
+                quarter = nn.Linear(cfg[2],cfg[2]//4)
+                eigth = nn.Linear(cfg[2],cfg[2]//8)
+                self.vec1 = quarter
+                self.vec2 = quarter
+                self.vec3 = quarter
+                self.vec4 = eigth
+                self.vec5 = eigth
+            elif self.nbVec == 7:
+                quarter = nn.Linear(cfg[2],cfg[2]//4)
+                eigth = nn.Linear(cfg[2],cfg[2]//8)
+                self.vec1 = quarter
+                self.vec2 = eigth
+                self.vec3 = eigth
+                self.vec4 = eigth
+                self.vec5 = eigth
+                self.vec6 = eigth
+                self.vec7 = eigth
+            else:
+                raise ValueError("Wrong part number for merge : ",self.nbVec)
 
     def _make_layer(self, block, planes, blocks, stride=1):
         downsample = None
@@ -222,7 +263,16 @@ class ResNetMtl(nn.Module):
 
         if self.repVec:
             x,simMap = representativeVectors(x,self.nbVec)
-            x = torch.cat(x,dim=-1)
+
+            if self.repvec_merge:
+                finalVec = []
+                for k,vec in enumerate(x):
+                    lin = getattr(self,"vec{}".format(k+1))
+                    outVec = lin(vec)
+                    finalVec.append(outVec)
+                x = torch.cat(finalVec,dim=-1)
+            else:
+                x = torch.cat(x,dim=-1)
         else:
             x = self.avgpool(x)
             x = x.view(x.size(0),-1)

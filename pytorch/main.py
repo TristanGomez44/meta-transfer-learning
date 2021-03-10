@@ -53,7 +53,7 @@ def run(args,trial):
             args.kl_interp = trial.suggest_float("kl_interp", 0.1, 1, step=0.1)
 
     elif args.phase == "pre_train":
-        args.pre_batch_size = trial.suggest_int("pre_batch_size",8, args.max_batch_size, log=True)
+        args.pre_batch_size = trial.suggest_int("pre_batch_size",2*torch.cuda.device_count(), args.max_batch_size, log=True)
         args.pre_lr = trial.suggest_float("pre_lr",1e-4, 1e-1, log=True)
         args.pre_gamma = trial.suggest_float("pre_gamma",0.05,0.25,step=0.05)
         args.pre_step_size = trial.suggest_int("pre_step_size",1,50, log=True)
@@ -61,7 +61,10 @@ def run(args,trial):
         args.pre_custom_weight_decay = trial.suggest_float("pre_custom_weight_decay", 1e-6, 1e-3, log=True)
         if args.rep_vec:
             if not args.distill_id:
-                args.nb_parts = trial.suggest_int("nb_parts", 3, 64, log=True)
+                if not args.repvec_merge:
+                    args.nb_parts = trial.suggest_int("nb_parts", 3, 64, log=True)
+                else:
+                    args.nb_parts = trial.suggest_int("nb_parts", 3, 7, step=2)
             else:
                 args.nb_parts = 3
                 bestTeachPreTrial = _getBestTrial(args,args.exp_id,args.distill_id)
@@ -271,6 +274,7 @@ if __name__ == '__main__':
     parser.add_argument('--pre_custom_weight_decay', type=float, default=0.0005) # Weight decay for the optimizer during pre-train
     parser.add_argument('--nb_parts', type=int, default=3) #
     parser.add_argument('--max_batch_size', type=int, default=256)
+    parser.add_argument('--repvec_merge', type=str2bool, default=False)
 
     #
     parser.add_argument('--exp_id', type=str,default="default")

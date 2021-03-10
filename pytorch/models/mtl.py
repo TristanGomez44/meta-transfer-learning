@@ -53,15 +53,15 @@ class MtlLearner(nn.Module):
 
         self.nbVec = args.nb_parts if repVecNb is None else repVecNb
 
-        featNb = self.nbVec*z_dim if args.rep_vec else z_dim
+        featNb = self.nbVec*z_dim if (args.rep_vec and not args.repvec_merge) else z_dim
 
         self.base_learner = BaseLearner(args,featNb)
 
         if self.mode == 'meta':
-            self.encoder = ResNetMtl(repVec=args.rep_vec,nbVec=self.nbVec,res=res)
+            self.encoder = ResNetMtl(repVec=args.rep_vec,nbVec=self.nbVec,res=res,repvec_merge=args.repvec_merge)
             self.pre_fc = None
         else:
-            self.encoder = ResNetMtl(mtl=False,repVec=args.rep_vec,nbVec=self.nbVec,res=res)
+            self.encoder = ResNetMtl(mtl=False,repVec=args.rep_vec,nbVec=self.nbVec,res=res,repvec_merge=args.repvec_merge)
             self.pre_fc = nn.Sequential(nn.Linear(featNb, 1000), nn.ReLU(), nn.Linear(1000, num_cls))
 
         if multi_gpu:

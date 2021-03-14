@@ -53,7 +53,7 @@ class PreTrainer(object):
         num_class_pretrain = self.trainset.num_class
 
         # Build pretrain model
-        self.model = MtlLearner(self.args, mode='pre', num_cls=num_class_pretrain,res="high" if self.args.distill_id else "low")
+        self.model = MtlLearner(self.args, mode='pre', num_cls=num_class_pretrain,res="high" if self.args.distill_id else "low",multi_gpu=len(args.gpu.split(","))>1)
 
         if self.args.distill_id:
             self.teacher = MtlLearner(self.args,mode="pre",res="low",repVecNb=self.args.nb_parts_teach,num_cls=num_class_pretrain)
@@ -119,6 +119,7 @@ class PreTrainer(object):
 
             # Using tqdm to read samples from train loader
             tqdm_gen = tqdm.tqdm(self.train_loader)
+            #for i, batch in enumerate(self.train_loader, 1):
             for i, batch in enumerate(tqdm_gen, 1):
                 # Update global count number
                 global_count = global_count + 1

@@ -22,8 +22,8 @@ from utils.misc import Averager, Timer, count_acc, compute_confidence_interval, 
 from tensorboardX import SummaryWriter
 from dataloader.dataset_loader import DatasetLoader as Dataset
 from gradcam import GradCAM
-
-
+from gradcam import GradCAMpp
+from guided_backprop import GuidedBackprop
 class MetaTrainer(object):
     """The class that contains the code for the meta-train phase and meta-eval phase."""
     def __init__(self, args):
@@ -268,7 +268,7 @@ class MetaTrainer(object):
 
         writer.close()
 
-    def eval(self):
+    def eval(self,gradcam=False,test_on_val=False):
         """The function for the meta-eval phase."""
         # Load the logs
         if os.path.exists(osp.join(self.args.save_path, 'trlog')):
@@ -276,13 +276,15 @@ class MetaTrainer(object):
         else:
             trlog = None
 
+        torch.manual_seed(1)
+        np.random.seed(1)
         # Load meta-test set
-        test_set = Dataset('test', self.args)
-        sampler = CategoriesSampler(test_set.label, 1200, self.args.way, self.args.shot + self.args.val_query)
+        test_set = Dataset('val' if test_on_val else 'test', self.args)
+        sampler = CategoriesSampler(test_set.label, 600, self.args.way, self.args.shot + self.args.val_query)
         loader = DataLoader(test_set, batch_sampler=sampler, num_workers=8, pin_memory=True)
 
         # Set test accuracy recorder
-        test_acc_record = np.zeros((1200,))
+        test_acc_record = np.zeros((600,))
 
         # Load model for meta-test phase
         if self.args.eval_weights is not None:
@@ -308,9 +310,13 @@ class MetaTrainer(object):
         else:
             label_shot = label_shot.type(torch.LongTensor)
 
-        self.model.layer3 = self.model.encoder.layer3
-        model_dict = dict(type="resnet", arch=self.model, layer_name='layer3')
-        grad_cam = GradCAM(model_dict, True)
+        if gradcam:
+            self.model.layer3 = self.model.encoder.layer3
+            model_dict = dict(type="resnet", arch=self.model, layer_name='layer3')
+            grad_cam = GradCAM(model_dict, True)
+            grad_cam_pp = GradCAMpp(model_dict, True)
+            self.model.features = self.model.encoder
+            guided = GuidedBackprop(self.model)
 
         # Start meta-test
         for i, batch in enumerate(loader, 1):
@@ -321,19 +327,36 @@ class MetaTrainer(object):
             k = self.args.way * self.args.shot
             data_shot, data_query = data[:k], data[k:]
 
-            if i % 5 == 0 and self.args.rep_vec:
-                print('batch {}: {:.2f}({:.2f})'.format(i, ave_acc.item() * 100, acc * 100))
-                logits,simMapQuer,simMapShot,normQuer,normShot = self.model((data_shot, label_shot, data_query),retSimMap=True)
+            if i % 5 == 0:
+                suff = "_val" if test_on_val else ""
+                if self.args.rep_vec:
+                    print('batch {}: {:.2f}({:.2f})'.format(i, ave_acc.item() * 100, acc * 100))
+                    logits,simMapQuer,simMapShot,normQuer,normShot,fast_weights = self.model((data_shot, label_shot, data_query),retSimMap=True)
 
-                torch.save(simMapQuer,"../results/{}/{}_simMapQuer{}.th".format(self.args.exp_id,self.args.model_id,i))
-                torch.save(simMapShot,"../results/{}/{}_simMapShot{}.th".format(self.args.exp_id,self.args.model_id,i))
-                torch.save(data_query,"../results/{}/{}_dataQuer{}.th".format(self.args.exp_id,self.args.model_id,i))
-                torch.save(data_shot,"../results/{}/{}_dataShot{}.th".format(self.args.exp_id,self.args.model_id,i))
-                torch.save(normQuer,"../results/{}/{}_normQuer{}.th".format(self.args.exp_id,self.args.model_id,i))
-                torch.save(normShot,"../results/{}/{}_normShot{}.th".format(self.args.exp_id,self.args.model_id,i))
+                    torch.save(simMapQuer,"../results/{}/{}_simMapQuer{}{}.th".format(self.args.exp_id,self.args.model_id,i,suff))
+                    torch.save(simMapShot,"../results/{}/{}_simMapShot{}{}.th".format(self.args.exp_id,self.args.model_id,i,suff))
+                    torch.save(data_query,"../results/{}/{}_dataQuer{}{}.th".format(self.args.exp_id,self.args.model_id,i,suff))
+                    torch.save(data_shot,"../results/{}/{}_dataShot{}{}.th".format(self.args.exp_id,self.args.model_id,i,suff))
+                    torch.save(normQuer,"../results/{}/{}_normQuer{}{}.th".format(self.args.exp_id,self.args.model_id,i,suff))
+                    torch.save(normShot,"../results/{}/{}_normShot{}{}.th".format(self.args.exp_id,self.args.model_id,i,suff))
+                else:
+                    logits,normQuer,normShot,fast_weights = self.model((data_shot, label_shot, data_query),retFastW=True,retNorm=True)
+                    torch.save(normQuer,"../results/{}/{}_normQuer{}{}.th".format(self.args.exp_id,self.args.model_id,i,suff))
+                    torch.save(normShot,"../results/{}/{}_normShot{}{}.th".format(self.args.exp_id,self.args.model_id,i,suff))
 
-                masks = grad_cam(logits=logits)
-                torch.save(masks,"../results/{}/{}_gradcamQuer{}.th".format(self.args.exp_id,self.args.model_id,i))
+                print("Saving gradmaps",i)
+                allMasks,allMasks_pp,allMaps = [],[],[]
+                for l in range(len(data_query)):
+                    allMasks.append(grad_cam(data_query[l:l+1],fast_weights,None))
+                    allMasks_pp.append(grad_cam_pp(data_query[l:l+1],fast_weights,None))
+                    allMaps.append(guided.generate_gradients(data_query[l:l+1],fast_weights))
+                allMasks = torch.cat(allMasks,dim=0)
+                allMasks_pp = torch.cat(allMasks_pp,dim=0)
+                allMaps = torch.cat(allMaps,dim=0)
+
+                torch.save(allMasks,"../results/{}/{}_gradcamQuer{}{}.th".format(self.args.exp_id,self.args.model_id,i,suff))
+                torch.save(allMasks_pp,"../results/{}/{}_gradcamppQuer{}{}.th".format(self.args.exp_id,self.args.model_id,i,suff))
+                torch.save(allMaps,"../results/{}/{}_guidedQuer{}{}.th".format(self.args.exp_id,self.args.model_id,i,suff))
 
             else:
                 logits = self.model((data_shot, label_shot, data_query))

@@ -17,5 +17,5 @@ for set in sets:
         os.makedirs(os.path.join(root,set))
 
     for className in trainClasses:
-        shutil.move(os.path.join(root,"data"sscsqc,os.path.join(root,set))
+        shutil.move(os.path.join(root,"data",className),os.path.join(root,set))
         #print(os.path.join(root,"data",className),"go to",os.path.join(root,set))

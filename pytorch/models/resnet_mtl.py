@@ -171,7 +171,7 @@ class BottleneckMtl(nn.Module):
 
 class ResNetMtl(nn.Module):
 
-    def __init__(self, layers=[4, 4, 4], mtl=True,repVec=True,nbVec=3,res="high",repvec_merge=False):
+    def __init__(self, layers=[4, 4, 4], mtl=True,repVec=True,nbVec=3,res="high",repvec_merge=False,b_cnn=False):
         super(ResNetMtl, self).__init__()
         if mtl:
             self.Conv2d = Conv2dMtl
@@ -231,6 +231,14 @@ class ResNetMtl(nn.Module):
             else:
                 raise ValueError("Wrong part number for merge : ",self.nbVec)
 
+
+        self.b_cnn = b_cnn
+        if self.b_cnn:
+            attention = [BasicBlock(cfg[-1], cfg[-1])]
+            attention.append(conv1x1(cfg[-1], nbVec))
+            attention.append(nn.ReLU())
+            self.att = nn.Sequential(*attention)
+
     def _make_layer(self, block, planes, blocks, stride=1):
         downsample = None
         if stride != 1 or self.inplanes != planes * block.expansion:
@@ -247,7 +255,13 @@ class ResNetMtl(nn.Module):
             layers.append(block(self.inplanes, planes))
         return nn.Sequential(*layers)
 
-    def forward(self, x,retSimMap=False):
+    def compAtt(self,x):
+        attMaps = self.att(x)
+        x = (attMaps.unsqueeze(2)*x.unsqueeze(1)).reshape(x.size(0),x.size(1)*(attMaps.size(1)),x.size(2),x.size(3))
+        x = self.avgpool(x)
+        return x.view(x.size(0), -1),[attMaps[:,i:i+1] for i in range(attMaps.size(1))]
+
+    def forward(self, x,retSimMap=False,retNorm=False):
         x = self.conv1(x)
         x = self.bn1(x)
         x = self.relu(x)
@@ -258,27 +272,34 @@ class ResNetMtl(nn.Module):
         if self.res == "high":
             x = x[:,:,2:-2,2:-2]
 
-        if retSimMap:
+        if retSimMap or retNorm:
             norm = torch.sqrt(torch.pow(x,2).sum(dim=1,keepdim=True))
 
         if self.repVec:
-            x,simMap = representativeVectors(x,self.nbVec)
+            if not self.b_cnn:
+                x,simMap = representativeVectors(x,self.nbVec)
+                if self.repvec_merge:
+                    finalVec = []
+                    for k,vec in enumerate(x):
+                        lin = getattr(self,"vec{}".format(k+1))
+                        outVec = lin(vec)
+                        finalVec.append(outVec)
+                    x = torch.cat(finalVec,dim=-1)
+                else:
+                    x = torch.cat(x,dim=-1)
 
-            if self.repvec_merge:
-                finalVec = []
-                for k,vec in enumerate(x):
-                    lin = getattr(self,"vec{}".format(k+1))
-                    outVec = lin(vec)
-                    finalVec.append(outVec)
-                x = torch.cat(finalVec,dim=-1)
             else:
-                x = torch.cat(x,dim=-1)
+                x,simMap= self.compAtt(x)
+
         else:
             x = self.avgpool(x)
             x = x.view(x.size(0),-1)
 
         if retSimMap:
             retDict = {"x":x,"simMap":simMap,"norm":norm}
+            return retDict
+        elif retNorm:
+            retDict = {"x":x,"norm":norm}
             return retDict
         else:
             return x

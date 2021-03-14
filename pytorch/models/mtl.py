@@ -13,6 +13,16 @@ import torch.nn as nn
 import torch.nn.functional as F
 from models.resnet_mtl import ResNetMtl
 
+class DataParallelModel(nn.DataParallel):
+    def __init__(self, model):
+        super(DataParallelModel, self).__init__(model)
+
+    def __getattr__(self, name):
+        try:
+            return super(DataParallelModel, self).__getattr__(name)
+        except AttributeError:
+            return getattr(self.module, name)
+
 class BaseLearner(nn.Module):
     """The class for inner loop."""
     def __init__(self, args, z_dim):
@@ -58,18 +68,18 @@ class MtlLearner(nn.Module):
         self.base_learner = BaseLearner(args,featNb)
 
         if self.mode == 'meta':
-            self.encoder = ResNetMtl(repVec=args.rep_vec,nbVec=self.nbVec,res=res,repvec_merge=args.repvec_merge)
+            self.encoder = ResNetMtl(repVec=args.rep_vec,nbVec=self.nbVec,res=res,repvec_merge=args.repvec_merge,b_cnn=args.b_cnn)
             self.pre_fc = None
         else:
-            self.encoder = ResNetMtl(mtl=False,repVec=args.rep_vec,nbVec=self.nbVec,res=res,repvec_merge=args.repvec_merge)
+            self.encoder = ResNetMtl(mtl=False,repVec=args.rep_vec,nbVec=self.nbVec,res=res,repvec_merge=args.repvec_merge,b_cnn=args.b_cnn)
             self.pre_fc = nn.Sequential(nn.Linear(featNb, 1000), nn.ReLU(), nn.Linear(1000, num_cls))
 
         if multi_gpu:
-            self.encoder = nn.DataParallel(self.encoder)
+            self.encoder = DataParallelModel(self.encoder)
             #self.pre_fc = nn.DataParallel(self.pre_fc) if not self.pre_fc is None else None
             #self.base_learner = nn.DataParallel(self.base_learner)
 
-    def forward(self, inp,retSimMap=False):
+    def forward(self, inp,retSimMap=False,retFastW=False,retNorm=False):
         """The function to forward the model.
         Args:
           inp: input images.
@@ -80,7 +90,7 @@ class MtlLearner(nn.Module):
             return self.pretrain_forward(inp)
         elif self.mode=='meta':
             data_shot, label_shot, data_query = inp
-            return self.meta_forward(data_shot, label_shot, data_query,retSimMap)
+            return self.meta_forward(data_shot, label_shot, data_query,retSimMap,retFastW,retNorm)
         elif self.mode=='preval':
             data_shot, label_shot, data_query = inp
             return self.preval_forward(data_shot, label_shot, data_query)
@@ -96,7 +106,7 @@ class MtlLearner(nn.Module):
         """
         return self.pre_fc(self.encoder(inp))
 
-    def meta_forward(self, data_shot, label_shot, data_query,retSimMap=False):
+    def meta_forward(self, data_shot, label_shot, data_query,retSimMap=False,retFastW=False,retNorm=False):
         """The function to forward meta-train phase.
         Args:
           data_shot: train images for the task
@@ -105,9 +115,9 @@ class MtlLearner(nn.Module):
         Returns:
           logits_q: the predictions for the test samples.
         """
-        if retSimMap:
-            querDic = self.encoder(data_query,retSimMap)
-            shotDic = self.encoder(data_shot,retSimMap)
+        if retSimMap or retNorm:
+            querDic = self.encoder(data_query,retSimMap,retNorm)
+            shotDic = self.encoder(data_shot,retSimMap,retNorm)
             embedding_query = querDic["x"]
             embedding_shot = shotDic["x"]
         else:
@@ -128,7 +138,13 @@ class MtlLearner(nn.Module):
             logits_q = self.base_learner(embedding_query, fast_weights)
 
         if retSimMap:
-            return logits_q,querDic["simMap"],shotDic["simMap"],querDic["norm"],shotDic["norm"]
+            return logits_q,querDic["simMap"],shotDic["simMap"],querDic["norm"],shotDic["norm"],fast_weights
+        elif retFastW:
+            if retNorm:
+                return logits_q,querDic["norm"],shotDic["norm"],fast_weights
+            else:
+                return logits_q,fast_weights
+            return logits_q,fast_weights
         else:
             return logits_q
 

@@ -8,6 +8,10 @@ case $1 in
   "pre_long")
     python3 main.py --dataset_dir datasets/cifar-FS/ --exp_id cifar --model_id pre_firstModel_long     --phase pre_train --optuna_trial_nb 50
     ;;
+  "bcnn")
+    python3 main.py --dataset_dir datasets/cifar-FS/ --exp_id cifar --model_id pre_firstModel_bcnn     --phase pre_train --optuna_trial_nb 1 --b_cnn True
+    python3 main.py --dataset_dir datasets/cifar-FS/ --exp_id cifar --model_id firstModel_bcnn     --phase meta_train --optuna_trial_nb 10 --b_cnn True   --pre_model_id pre_firstModel_bcnn --fix_trial_id True --val_query 5
+    ;;
   "pre_long_fc100_merged")
     python3 main.py --dataset_dir datasets/FC100/ --exp_id fc100 --model_id pre_firstModel_long_merged     --phase pre_train --optuna_trial_nb 25 --repvec_merge True
     ;;
@@ -42,8 +46,14 @@ case $1 in
     python3 main.py --dataset_dir datasets/cifar-FS/ --exp_id cifar --model_id firstModel_dist_fix --phase meta_train --val_query 5 --fix_trial_id True --best True --high_res True --trial_id 5
     ;;
   "dist_best")
-    python3 main.py --dataset_dir datasets/cifar-FS/ --exp_id cifar --model_id firstModel_dist     --phase meta_train --max_epoch 80 --optuna_trial_nb 10 --max_batch_size 150 --val_query 5 --fix_trial_id True \
-                     --best True --high_res True --trial_id 139
+    python3 main.py --dataset_dir datasets/cifar-FS/ --exp_id cifar --model_id firstModel_dist     --phase meta_train --max_epoch 80 \
+                      --optuna_trial_nb 10 --max_batch_size 150 --val_query 5 --fix_trial_id True \
+                     --best True --high_res True --trial_id 139  --grad_cam True
+    ;;
+  "dist_best_val")
+    python3 main.py --dataset_dir datasets/cifar-FS/ --exp_id cifar --model_id firstModel_dist     --phase meta_train --max_epoch 80 \
+                      --optuna_trial_nb 10 --max_batch_size 150 --val_query 5 --fix_trial_id True \
+                     --best True --high_res True --trial_id 139  --grad_cam True --test_on_val True
     ;;
   "long_noRV")
     python3 main.py --dataset_dir datasets/cifar-FS/ --exp_id cifar --model_id firstModel_noRV     --phase meta_train --pre_model_id pre_firstModel_noRV --max_epoch 100 --optuna_trial_nb 10 --rep_vec False --fix_trial_id True

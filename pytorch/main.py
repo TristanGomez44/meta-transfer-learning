@@ -42,11 +42,13 @@ def run(args,trial):
         args.step_size = trial.suggest_int("step_size",1,50,log=True)
         args.gamma = trial.suggest_float("gamma",0.1,0.9,step=0.2)
         if args.rep_vec:
-            if args.distill_id:
-                bestTeachPreTrial = _getBestTrial(args,args.exp_id,args.distill_id_pre)
-                print("bestTeachPreTrial",bestTeachPreTrial)
-                args.nb_parts_teach = getBestPartNb(bestTeachPreTrial,args.exp_id,args.distill_id_pre)
-                args.best_trial_teach = _getBestTrial(args,args.exp_id,args.distill_id)
+            if args.b_cnn:
+                args.nb_parts = 3
+            else:
+                if args.distill_id:
+                    bestTeachPreTrial = _getBestTrial(args,args.exp_id,args.distill_id_pre)
+                    args.nb_parts_teach = getBestPartNb(bestTeachPreTrial,args.exp_id,args.distill_id_pre)
+                    args.best_trial_teach = _getBestTrial(args,args.exp_id,args.distill_id)
 
         if args.distill_id:
             args.kl_temp = trial.suggest_float("kl_temp", 1, 21, step=5)
@@ -60,15 +62,18 @@ def run(args,trial):
         args.pre_custom_momentum = trial.suggest_float("pre_custom_momentum", 0.5, 0.99,log=True)
         args.pre_custom_weight_decay = trial.suggest_float("pre_custom_weight_decay", 1e-6, 1e-3, log=True)
         if args.rep_vec:
-            if not args.distill_id:
-                if not args.repvec_merge:
-                    args.nb_parts = trial.suggest_int("nb_parts", 3, 64, log=True)
-                else:
-                    args.nb_parts = trial.suggest_int("nb_parts", 3, 7, step=2)
-            else:
+            if args.b_cnn:
                 args.nb_parts = 3
-                bestTeachPreTrial = _getBestTrial(args,args.exp_id,args.distill_id)
-                args.nb_parts_teach = getBestPartNb(bestTeachPreTrial,args.exp_id,args.distill_id)
+            else:
+                if not args.distill_id:
+                    if not args.repvec_merge:
+                        args.nb_parts = trial.suggest_int("nb_parts", 3, 64, log=True)
+                    else:
+                        args.nb_parts = trial.suggest_int("nb_parts", 3, 7, step=2)
+                else:
+                    args.nb_parts = 3
+                    bestTeachPreTrial = _getBestTrial(args,args.exp_id,args.distill_id)
+                    args.nb_parts_teach = getBestPartNb(bestTeachPreTrial,args.exp_id,args.distill_id)
 
         if args.distill_id:
             args.kl_temp = trial.suggest_float("kl_temp", 1, 21, step=5)
@@ -81,11 +86,14 @@ def run(args,trial):
 
     if args.phase == "meta_train":
 
-        if not args.distill_id:
-            bestPreTrialNb,args.nb_parts = findBestTrial(args,pre=True)
+        if args.rep_vec:
+            if (not args.distill_id) and (not args.b_cnn):
+                bestPreTrialNb,args.nb_parts = findBestTrial(args,pre=True)
+            else:
+                bestPreTrialNb = getBestTrial(args,pre=True)
+                args.nb_parts = 3
         else:
             bestPreTrialNb = getBestTrial(args,pre=True)
-            args.nb_parts = 3
 
         if args.fix_trial_id:
             bestPreTrialNb -= 1
@@ -124,7 +132,8 @@ def findBestTrial(args,pre):
     return bestTrial,best_part_nb
 
 def getBestPartNb(bestTrialId,exp_id,model_id):
-    print(bestTrialId,exp_id,model_id)
+    print("../results/{}/{}_hypSearch.db".format(exp_id,model_id),bestTrialId)
+    print("SELECT param_value FROM trial_params WHERE trial_id == {} and param_name == 'nb_parts' ".format(bestTrialId))
     con = sqlite3.connect("../results/{}/{}_hypSearch.db".format(exp_id,model_id))
     curr = con.cursor()
     curr.execute("SELECT param_value FROM trial_params WHERE trial_id == {} and param_name == 'nb_parts' ".format(bestTrialId))
@@ -137,7 +146,6 @@ def getBestTrial(args,pre):
     return _getBestTrial(args,args.exp_id,id)
 
 def _getBestTrial(args,exp_id,model_id):
-    print("../results/{}/{}_hypSearch.db".format(exp_id,model_id))
     con = sqlite3.connect("../results/{}/{}_hypSearch.db".format(exp_id,model_id))
     curr = con.cursor()
 
@@ -146,39 +154,43 @@ def _getBestTrial(args,exp_id,model_id):
 
     query_res = list(filter(lambda x:not x[1] is None,query_res))
 
+    bestTrial = None
+
     if len(query_res) == 0:
-        print("Query length is zero")
 
         curr.execute('SELECT trial_id,value FROM trial_values')
         query_res = curr.fetchall()
         query_res = list(filter(lambda x:not x[1] is None,query_res))
 
-        trialIds = [id_value[0] for id_value in query_res]
-        values = [id_value[1] for id_value in query_res]
+        if len(query_res) == 0:
+            curr.execute('SELECT trial_id FROM trial_params')
+            query_res = curr.fetchall()
+            bestTrial = query_res[-1][0]
+        else:
+            trialIds = [id_value[0] for id_value in query_res]
+            values = [id_value[1] for id_value in query_res]
 
-        bestDic = {}
-        for i in range(len(trialIds)):
-            if trialIds[i] in bestDic:
-                if values[i] > bestDic[trialIds[i]]:
+            bestDic = {}
+            for i in range(len(trialIds)):
+                if trialIds[i] in bestDic:
+                    if values[i] > bestDic[trialIds[i]]:
+                        bestDic[trialIds[i]] = values[i]
+                else:
                     bestDic[trialIds[i]] = values[i]
-            else:
-                bestDic[trialIds[i]] = values[i]
 
-        trialIds = list(bestDic.keys())
-        values = [bestDic[id] for id in trialIds]
-
-        print(trialIds)
-        print(values)
+            trialIds = list(bestDic.keys())
+            values = [bestDic[id] for id in trialIds]
 
     else:
 
         trialIds = [id_value[0] for id_value in query_res]
         values = [id_value[1] for id_value in query_res]
 
-    trialIds = trialIds[:args.optuna_trial_nb]
-    values = values[:args.optuna_trial_nb]
+    if bestTrial is None:
+        trialIds = trialIds[:args.optuna_trial_nb]
+        values = values[:args.optuna_trial_nb]
 
-    bestTrial = trialIds[np.array(values).argmax()]
+        bestTrial = trialIds[np.array(values).argmax()]
 
     return bestTrial
 
@@ -201,7 +213,6 @@ def setBestParams(args):
                     "pre_custom_weight_decay":args.pre_custom_weight_decay,"nb_parts":args.nb_parts}
 
     for param in params:
-        print("SELECT param_value FROM trial_params WHERE trial_id == {} and param_name == '{}' ".format(trialId,param))
         curr.execute("SELECT param_value FROM trial_params WHERE trial_id == {} and param_name == '{}' ".format(trialId,param))
         query_res = curr.fetchall()
         param_val = type(dic[param])(query_res[0][0])
@@ -275,6 +286,10 @@ if __name__ == '__main__':
     parser.add_argument('--nb_parts', type=int, default=3) #
     parser.add_argument('--max_batch_size', type=int, default=256)
     parser.add_argument('--repvec_merge', type=str2bool, default=False)
+    parser.add_argument('--b_cnn', type=str2bool, default=False)
+
+    parser.add_argument('--grad_cam', type=str2bool, default=False)
+    parser.add_argument('--test_on_val', type=str2bool, default=False)
 
     #
     parser.add_argument('--exp_id', type=str,default="default")
@@ -348,7 +363,12 @@ if not args.best:
                     raise RuntimeError(e)
 
     if args.phase == "meta_train":
-        bestTrialId,args.nb_parts = findBestTrial(args,pre=False)
+        if args.distill_id is None and (not args.b_cnn):
+            bestTrialId,args.nb_parts = findBestTrial(args,pre=False)
+        else:
+            bestTrialId = getBestTrial(args,pre=False)
+            args.nb_parts = 3
+
         args.eval_weights = "../models/{}/meta_{}_trial{}_max_acc.pth".format(args.exp_id,args.model_id,bestTrialId-1)
         args.init_weights = "../models/{}/meta_{}_trial{}_max_acc.pth".format(args.exp_id,args.model_id,bestTrialId-1)
 
@@ -357,7 +377,7 @@ if not args.best:
         args = setBestParams(args)
 
         trainer = MetaTrainer(args)
-        trainer.eval()
+        trainer.eval(args.grad_cam,args.test_on_val)
 else:
     if args.phase == "meta_train":
 
@@ -370,7 +390,7 @@ else:
         args.eval_weights = "../models/{}/meta_{}_trial{}_max_acc.pth".format(args.exp_id,args.model_id,trial_id-1)
 
         trainer = MetaTrainer(args)
-        val = trainer.eval()
+        val = trainer.eval(args.grad_cam,args.test_on_val)
 
     else:
         args = setBestParams(args)
